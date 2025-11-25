@@ -24,83 +24,86 @@
         textarea:focus, input:focus { outline: none; }
         .animate-fade-in { animation: fadeIn 0.2s ease-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+        
+        /* Tooltip for validation */
+        .tooltip-trigger:hover .tooltip-content { display: block; }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useMemo, useRef } = React;
+        const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
-        // --- ECS Reference Data (Non-Keyword Fields) ---
+        // --- ECS Reference Data (Comprehensive Non-Keyword Fields) ---
         const ECS_NON_KEYWORD_FIELDS = {
-            // Date
-            "@timestamp": "date",
-            "event.created": "date",
-            "event.ingested": "date",
-            "event.start": "date",
-            "event.end": "date",
-            "file.created": "date",
-            "file.accessed": "date",
-            "file.mtime": "date",
-            "file.ctime": "date",
-            "process.start": "date",
-            "process.end": "date",
-            "tls.client.not_after": "date",
-            "tls.client.not_before": "date",
-            "tls.server.not_after": "date",
-            "tls.server.not_before": "date",
+            // --- DATE FIELDS ---
+            "@timestamp": "date", "event.created": "date", "event.ingested": "date", "event.start": "date", "event.end": "date",
+            "file.created": "date", "file.accessed": "date", "file.mtime": "date", "file.ctime": "date", "process.start": "date", "process.end": "date",
+            "tls.client.not_after": "date", "tls.client.not_before": "date", "tls.server.not_after": "date", "tls.server.not_before": "date",
+            "x509.not_after": "date", "x509.not_before": "date",
             
-            // IP
-            "source.ip": "ip",
-            "destination.ip": "ip",
-            "client.ip": "ip",
-            "server.ip": "ip",
-            "host.ip": "ip",
-            "network.forwarded_ip": "ip",
-            "related.ip": "ip",
-            "dns.resolved_ip": "ip",
+            // --- IP FIELDS ---
+            "source.ip": "ip", "source.nat.ip": "ip", "destination.ip": "ip", "destination.nat.ip": "ip",
+            "client.ip": "ip", "client.nat.ip": "ip", "server.ip": "ip", "server.nat.ip": "ip",
+            "host.ip": "ip", "network.forwarded_ip": "ip", "related.ip": "ip", "dns.resolved_ip": "ip",
+            "observer.ip": "ip", "threat.indicator.ip": "ip", "vulnerability.scanner.ip": "ip",
 
-            // Long / Integer
-            "source.port": "long",
-            "destination.port": "long",
-            "client.port": "long",
-            "server.port": "long",
-            "source.bytes": "long",
-            "destination.bytes": "long",
-            "client.bytes": "long",
-            "server.bytes": "long",
-            "source.packets": "long",
-            "destination.packets": "long",
-            "client.packets": "long",
-            "server.packets": "long",
-            "network.bytes": "long",
-            "network.packets": "long",
-            "event.duration": "long",
-            "event.sequence": "long",
-            "http.request.bytes": "long",
-            "http.response.bytes": "long",
-            "http.response.status_code": "long",
-            "process.pid": "long",
-            "process.parent.pid": "long",
-            "process.thread.id": "long",
-            "process.exit_code": "long",
-            "process.uptime": "long",
-            "host.uptime": "long",
-            "file.size": "long",
-            "url.port": "long",
+            // --- LONG / INTEGER FIELDS ---
+            "source.port": "long", "destination.port": "long", "client.port": "long", "server.port": "long", "url.port": "long",
+            "source.bytes": "long", "destination.bytes": "long", "client.bytes": "long", "server.bytes": "long", "network.bytes": "long",
+            "source.packets": "long", "destination.packets": "long", "network.packets": "long",
+            "http.response.status_code": "long", "process.pid": "long", "process.ppid": "long", "process.parent.pid": "long",
+            "event.duration": "long", "event.sequence": "long", "event.severity": "long", "file.size": "long",
 
-            // Float
-            "event.risk_score": "float",
-            "event.risk_score_norm": "float",
+            // --- FLOAT FIELDS ---
+            "event.risk_score": "float", "event.risk_score_norm": "float", "host.cpu.usage": "float", "host.memory.usage": "float",
 
-            // Text / Match Only Text
-            "message": "text",
-            "error.message": "text",
-            "event.original": "text"
+            // --- BOOLEAN FIELDS ---
+            "tls.established": "boolean", "process.interactive": "boolean", "file.code_signature.valid": "boolean",
+
+            // --- TEXT FIELDS ---
+            "message": "text", "error.message": "text", "error.stack_trace": "text", "event.original": "text",
+            "http.request.body.content": "text", "http.response.body.content": "text", "process.command_line": "text",
+            
+            // --- GEO POINT FIELDS ---
+            "geo.location": "geo_point", "source.geo.location": "geo_point", "destination.geo.location": "geo_point",
+            "client.geo.location": "geo_point", "server.geo.location": "geo_point", "host.geo.location": "geo_point"
         };
 
-        // --- Icons Components ---
+        // --- Validation Helper ---
+        const validateEcsType = (value, type) => {
+            if (value === undefined || value === null || value === "") return true; // Empty is valid/ignored
+            
+            // Helper to strip " characters if value comes stringified
+            const rawVal = value; 
+            const strVal = String(value).trim();
+
+            switch (type) {
+                case 'ip':
+                    // IPv4 or IPv6 loose check
+                    return /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(strVal) || strVal.includes(':');
+                case 'long':
+                case 'integer':
+                    // Allow string numbers "123", but not "123.45" or "abc"
+                    return /^-?\d+$/.test(strVal) && !isNaN(parseInt(strVal));
+                case 'float':
+                    return !isNaN(parseFloat(strVal));
+                case 'boolean':
+                    return /^(true|false|0|1)$/i.test(strVal);
+                case 'date':
+                    // Very basic check: numeric timestamp OR contains separators like - or : or T
+                    return !isNaN(Date.parse(strVal)) || /^\d+$/.test(strVal) || (strVal.includes('-') && strVal.includes(':'));
+                case 'geo_point':
+                    // Check for "lat,lon" string or object
+                    if (typeof rawVal === 'object') return ('lat' in rawVal && 'lon' in rawVal);
+                    return strVal.includes(',') || strVal.includes('[');
+                default:
+                    return true;
+            }
+        };
+
+        // --- Icons ---
         const Icon = ({ path, size = 16, className = "" }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
                 {path}
@@ -132,14 +135,18 @@
             Bell: <><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></>,
             FilePlus: <><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="12" x2="12" y1="18" y2="12"/><line x1="9" x2="15" y1="15" y2="15"/></>,
             Upload: <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" x2="12" y1="3" y2="15" /></>,
-            Play: <polygon points="5 3 19 12 5 21 5 3" />
+            History: <><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /><path d="M12 7v5l4 2" /></>,
+            Play: <polygon points="5 3 19 12 5 21 5 3" />,
+            RefreshCw: <><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></>,
+            AlertTriangle: <><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></>,
+            Info: <><circle cx="12" cy="12" r="10" /><line x1="12" x2="12" y1="16" y2="12" /><line x1="12" x2="12.01" y1="8" y2="8" /></>
         };
 
         const SimpleIcon = ({ name, size, className }) => (
             <Icon path={Icons[name] || Icons.Code} size={size} className={className} />
         );
 
-        // --- Helper: Find _temp recursively ---
+        // --- Helpers ---
         const findTempObject = (obj) => {
             if (!obj || typeof obj !== 'object') return null;
             if (Array.isArray(obj)) return null;
@@ -153,42 +160,48 @@
             return null;
         };
 
-        // --- Helper: Extract Keys ---
         const extractKeys = (obj, prefix = '') => {
             let keys = [];
             for (const key in obj) {
                 if (typeof obj[key] === 'object' && obj[key] !== null && !Array.isArray(obj[key])) {
                     keys = keys.concat(extractKeys(obj[key], prefix ? `${prefix}.${key}` : key));
                 } else {
-                    keys.push({
-                        fullPath: prefix ? `${prefix}.${key}` : key,
-                        name: key,
-                        sampleValue: obj[key]
-                    });
+                    keys.push({ fullPath: prefix ? `${prefix}.${key}` : key, name: key, sampleValue: obj[key] });
                 }
             }
             return keys;
         };
 
-        // --- Conversion Component ---
+        // --- Local Storage Hook ---
+        const useStickyState = (defaultValue, key) => {
+            const [value, setValue] = useState(() => {
+                const stickyValue = window.localStorage.getItem(key);
+                return stickyValue !== null ? JSON.parse(stickyValue) : defaultValue;
+            });
+            useEffect(() => {
+                window.localStorage.setItem(key, JSON.stringify(value));
+            }, [key, value]);
+            return [value, setValue];
+        };
+
+        // Special hook for Map
+        const useStickyMapState = (key) => {
+            const [value, setValue] = useState(() => {
+                const stickyValue = window.localStorage.getItem(key);
+                return stickyValue !== null ? new Map(JSON.parse(stickyValue)) : new Map();
+            });
+            useEffect(() => {
+                window.localStorage.setItem(key, JSON.stringify(Array.from(value.entries())));
+            }, [key, value]);
+            return [value, setValue];
+        };
+
         const ConversionEditor = ({ conversions, onAdd, onRemove, placeholderPrefix }) => {
             const [newFrom, setNewFrom] = useState("");
             const [newTo, setNewTo] = useState("");
             const toInputRef = useRef(null);
-
-            const handleAdd = () => {
-                if (newFrom && newTo) {
-                    onAdd(newFrom, newTo);
-                    setNewFrom("");
-                    setNewTo("");
-                }
-            };
-
-            const handleAddDefault = () => {
-                setNewFrom("default");
-                setNewTo("");
-                if (toInputRef.current) toInputRef.current.focus();
-            };
+            const handleAdd = () => { if (newFrom && newTo) { onAdd(newFrom, newTo); setNewFrom(""); setNewTo(""); } };
+            const handleAddDefault = () => { setNewFrom("default"); setNewTo(""); if (toInputRef.current) toInputRef.current.focus(); };
 
             return (
                 <div className="space-y-2 pl-8"> 
@@ -202,184 +215,126 @@
                         </div>
                     ))}
                     <div className="flex items-center gap-2 bg-slate-900/50 p-1 rounded border border-slate-700/50">
-                        <div className="flex-1 min-w-0 relative">
-                             <input 
-                                value={newFrom}
-                                onChange={(e) => setNewFrom(e.target.value)}
-                                placeholder="From" 
-                                className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs focus:border-amber-500 outline-none" 
-                            />
-                        </div>
+                        <div className="flex-1 min-w-0 relative"><input value={newFrom} onChange={(e) => setNewFrom(e.target.value)} placeholder="From" className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs focus:border-amber-500 outline-none" /></div>
                         <SimpleIcon name="ArrowRight" size={10} className="text-slate-500" />
-                        <input 
-                            ref={toInputRef}
-                            value={newTo}
-                            onChange={(e) => setNewTo(e.target.value)}
-                            placeholder="To" 
-                            className="flex-1 min-w-0 bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs focus:border-amber-500 outline-none" 
-                            onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); }}
-                        />
-                        <button onClick={handleAddDefault} className="p-1 px-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-amber-500 text-[10px] rounded transition-colors" title="Set Default Value">Default</button>
+                        <input ref={toInputRef} value={newTo} onChange={(e) => setNewTo(e.target.value)} placeholder="To" className="flex-1 min-w-0 bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs focus:border-amber-500 outline-none" onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); }} />
+                        <button onClick={handleAddDefault} className="p-1 px-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-amber-500 text-[10px] rounded transition-colors" title="Set Default">Def</button>
                         <button onClick={handleAdd} className="p-1 bg-slate-700 hover:bg-amber-600 hover:text-white text-slate-300 rounded transition-colors"><SimpleIcon name="Plus" size={12} /></button>
                     </div>
                 </div>
             );
         };
 
-        // --- Main Application ---
+        // --- Main App ---
         function App() {
-            const initialInput = JSON.stringify({
-                "_temp": {
-                    "username": "peter",
-                    "action": "pass",
-                    "status": "1",
-                    "role": "admin",
-                    "deprecated_field": "ignore_me"
-                }
-            }, null, 2);
+            // Empty default to prevent autosaving sample data
+            const defaultInput = ""; 
 
-            const [inputStr, setInputStr] = useState(initialInput);
-            const [bulkMapStr, setBulkMapStr] = useState("");
-            const [moduleName, setModuleName] = useState("{module.name}");
-            const [ignoreStr, setIgnoreStr] = useState("password, v, deprecated_field");
-            const [parsedJson, setParsedJson] = useState(null);
-            const [error, setError] = useState(null);
-            const [sortOrder, setSortOrder] = useState('original');
+            // Sticky States (Persistence)
+            const [inputStr, setInputStr] = useStickyState(defaultInput, 'jcb_inputStr');
+            const [bulkMapStr, setBulkMapStr] = useStickyState("", 'jcb_bulkMapStr');
+            const [moduleName, setModuleName] = useStickyState("", 'jcb_moduleName'); // Empty default for reminder
+            const [ignoreStr, setIgnoreStr] = useStickyState("password, v, deprecated_field", 'jcb_ignoreStr');
+            const [sortOrder, setSortOrder] = useStickyState('original', 'jcb_sortOrder');
             
-            const [mappings, setMappings] = useState({}); 
-            const [extraMappings, setExtraMappings] = useState({}); 
-            const [excludedKeys, setExcludedKeys] = useState({});
-            const [conversions, setConversions] = useState({});
+            const [mappings, setMappings] = useStickyState({}, 'jcb_mappings'); 
+            const [extraMappings, setExtraMappings] = useStickyState({}, 'jcb_extraMappings'); 
+            const [excludedKeys, setExcludedKeys] = useStickyState({}, 'jcb_excludedKeys');
+            const [conversions, setConversions] = useStickyState({}, 'jcb_conversions');
             const [expandedPanels, setExpandedPanels] = useState({}); 
             
-            const [historyFields, setHistoryFields] = useState(new Map());
-            const [bulkLog, setBulkLog] = useState([]); // Stores log entries
-            
+            const [historyFields, setHistoryFields] = useStickyMapState('jcb_historyFields');
+            const [bulkLog, setBulkLog] = useStickyState([], 'jcb_bulkLog');
+
+            // Transient States
+            const [parsedJson, setParsedJson] = useState(null);
+            const [error, setError] = useState(null);
             const [copySuccess, setCopySuccess] = useState(false);
             const [searchTerm, setSearchTerm] = useState("");
 
-            const ignoreList = useMemo(() => {
-                return ignoreStr.split(/[,，\n]+/).map(s => s.trim()).filter(s => s);
-            }, [ignoreStr]);
+            const ignoreList = useMemo(() => ignoreStr.split(/[,，\n]+/).map(s => s.trim()).filter(s => s), [ignoreStr]);
+
+            // Initial Sample for "Load Sample" button
+            const sampleInput = JSON.stringify({ "_temp": { "username": "peter", "action": "pass", "status": "1", "role": "admin", "deprecated_field": "ignore_me" } }, null, 2);
 
             useEffect(() => {
                 try {
-                    if (!inputStr.trim()) {
-                        setParsedJson(null);
-                        setError(null);
-                        return;
-                    }
+                    if (!inputStr.trim()) { setParsedJson(null); setError(null); return; }
                     const rawParsed = JSON.parse(inputStr);
                     const tempObj = findTempObject(rawParsed);
-                    if (tempObj) {
-                        setParsedJson(tempObj);
-                        setError(null);
-                    } else {
-                        setParsedJson(null);
-                        setError("找不到 '_temp' 物件 (Missing _temp object)");
-                    }
-                } catch (e) {
-                    setError("JSON 格式錯誤");
-                    setParsedJson(null);
-                }
+                    if (tempObj) { setParsedJson(tempObj); setError(null); }
+                    else { setParsedJson(null); setError("找不到 '_temp' 物件"); }
+                } catch (e) { setError("JSON 格式錯誤"); setParsedJson(null); }
             }, [inputStr]);
 
-            const currentInputKeys = useMemo(() => {
-                if (!parsedJson) return [];
-                return extractKeys(parsedJson);
-            }, [parsedJson]);
+            const currentInputKeys = useMemo(() => (!parsedJson ? [] : extractKeys(parsedJson)), [parsedJson]);
 
-            // Merged Keys with Old/New Values
+            // Reset Function
+            const handleResetApp = () => {
+                if(confirm("Are you sure you want to clear all data and reset?")) {
+                    localStorage.clear();
+                    window.location.reload();
+                }
+            };
+
+            const handleLoadSample = () => {
+                setInputStr(sampleInput);
+            };
+
+            // Merged Keys
             const mergedKeys = useMemo(() => {
                 const keysMap = new Map();
-
-                // 1. Populate with History (Old Values)
-                historyFields.forEach((k, name) => {
-                    keysMap.set(name, {
-                        ...k,
-                        oldValue: k.sampleValue,
-                        newValue: undefined,
-                        sampleValue: k.sampleValue
-                    });
-                });
-
-                // 2. Merge Current (New Values)
+                historyFields.forEach((k, name) => { keysMap.set(name, { ...k, oldValue: k.sampleValue, newValue: undefined, sampleValue: k.sampleValue }); });
                 currentInputKeys.forEach(k => {
                     if (keysMap.has(k.name)) {
                         const existing = keysMap.get(k.name);
-                        keysMap.set(k.name, {
-                            ...existing,
-                            newValue: k.sampleValue,
-                            sampleValue: k.sampleValue
-                        });
+                        keysMap.set(k.name, { ...existing, newValue: k.sampleValue, sampleValue: k.sampleValue });
                     } else {
-                        keysMap.set(k.name, {
-                            ...k,
-                            oldValue: undefined,
-                            newValue: k.sampleValue,
-                            sampleValue: k.sampleValue
-                        });
+                        keysMap.set(k.name, { ...k, oldValue: undefined, newValue: k.sampleValue, sampleValue: k.sampleValue });
                     }
                 });
-
                 return Array.from(keysMap.values());
             }, [historyFields, currentInputKeys]);
 
+            // Filtering
             const filteredKeys = useMemo(() => {
                 const searchLower = searchTerm.toLowerCase();
                 const currentPrefix = moduleName.trim() || 'user';
-
                 let keys = mergedKeys.filter(k => {
                     const isIgnored = ignoreList.includes(k.name);
                     if (isIgnored) return false;
-
                     if (!searchLower) return true;
-
                     if (k.name.toLowerCase().includes(searchLower)) return true;
                     if (k.fullPath.toLowerCase().includes(searchLower)) return true;
-
                     const userDefined = mappings[k.name];
                     const effectiveTarget = userDefined !== undefined ? userDefined : `${currentPrefix}.${k.name}`;
                     if (effectiveTarget.toLowerCase().includes(searchLower)) return true;
-
                     if (extraMappings[k.name] && Array.isArray(extraMappings[k.name])) {
-                        const hasMatchInExtras = extraMappings[k.name].some(ex => 
-                            ex.path && ex.path.toLowerCase().includes(searchLower)
-                        );
-                        if (hasMatchInExtras) return true;
+                        if (extraMappings[k.name].some(ex => ex.path && ex.path.toLowerCase().includes(searchLower))) return true;
                     }
                     return false;
                 });
-
-                if (sortOrder === 'az') {
-                    keys.sort((a, b) => a.name.localeCompare(b.name));
-                }
+                if (sortOrder === 'az') keys.sort((a, b) => a.name.localeCompare(b.name));
                 return keys;
             }, [mergedKeys, searchTerm, ignoreList, sortOrder, mappings, moduleName, extraMappings]);
 
+            // Output JSON
             const outputJson = useMemo(() => {
                 const prefix = moduleName.trim() || 'user';
                 const directory = [];
-
                 let processKeys = mergedKeys.filter(k => !ignoreList.includes(k.name) && !excludedKeys[k.name]);
-                if (sortOrder === 'az') {
-                    processKeys.sort((a, b) => a.name.localeCompare(b.name));
-                }
+                if (sortOrder === 'az') processKeys.sort((a, b) => a.name.localeCompare(b.name));
 
                 processKeys.forEach(k => {
                     const userDefinedTo = mappings[k.name] || "";
                     const defaultTo = `${prefix}.${k.name}`;
-                    
                     let primaryConvertData = undefined;
                     if (conversions[k.name] && conversions[k.name].length > 0) {
                         primaryConvertData = {};
                         conversions[k.name].forEach(c => { if (c.from && c.to) primaryConvertData[c.from] = c.to; });
                     }
-
                     const primaryEntry = { name: k.name, to: userDefinedTo || defaultTo };
-                    if (primaryConvertData && Object.keys(primaryConvertData).length > 0) {
-                        primaryEntry.convert = primaryConvertData;
-                    }
+                    if (primaryConvertData && Object.keys(primaryConvertData).length > 0) primaryEntry.convert = primaryConvertData;
                     directory.push(primaryEntry);
 
                     if (extraMappings[k.name] && Array.isArray(extraMappings[k.name])) {
@@ -395,141 +350,105 @@
                         });
                     }
                 });
-
-                const result = { module: moduleName, ignore: ignoreList, directory: directory };
-                return JSON.stringify(result, null, 2);
+                return JSON.stringify({ module: moduleName, ignore: ignoreList, directory: directory }, null, 2);
             }, [moduleName, ignoreList, mergedKeys, mappings, excludedKeys, conversions, extraMappings, sortOrder]);
 
+            // Actions
             const handleInputNew = () => {
-                setHistoryFields(prev => {
-                    const newHistory = new Map(prev);
-                    currentInputKeys.forEach(k => newHistory.set(k.name, k));
-                    return newHistory;
-                });
+                setHistoryFields(prev => { const newHistory = new Map(prev); currentInputKeys.forEach(k => newHistory.set(k.name, k)); return newHistory; });
                 setInputStr("");
             };
-
             const handleMappingChange = (keyName, newValue) => {
-                const currentPrefix = moduleName.trim() || 'user';
-                const defaultTo = `${currentPrefix}.${keyName}`;
-                if (newValue === defaultTo) {
-                    setMappings(prev => { const next = { ...prev }; delete next[keyName]; return next; });
-                } else {
-                    setMappings(prev => ({ ...prev, [keyName]: newValue }));
-                }
+                const defaultTo = `${(moduleName.trim() || 'user')}.${keyName}`;
+                if (newValue === defaultTo) { setMappings(prev => { const next = { ...prev }; delete next[keyName]; return next; }); }
+                else { setMappings(prev => ({ ...prev, [keyName]: newValue })); }
             };
-
             const toggleExclude = (keyName) => setExcludedKeys(prev => ({ ...prev, [keyName]: !prev[keyName] }));
             const togglePanel = (panelId) => setExpandedPanels(prev => ({ ...prev, [panelId]: !prev[panelId] }));
-
-            // Refined Apply Import Logic
+            const handleBulkImport = (value) => setBulkMapStr(value);
+            
             const applyBulkImport = () => {
                 const lines = bulkMapStr.split('\n');
                 const newMappings = {};
                 lines.forEach(line => {
                     const parts = line.split('\t');
                     if (parts.length >= 2) {
-                        const key = parts[0].trim();
-                        const target = parts[1].trim();
+                        const key = parts[0].trim(); const target = parts[1].trim();
                         if (key && target) newMappings[key] = target;
                     }
                 });
-
                 if (Object.keys(newMappings).length === 0) return;
-
                 const changes = [];
                 Object.keys(newMappings).forEach(key => {
-                    const oldVal = mappings[key];
-                    const newVal = newMappings[key];
-                    // Logic: Only log if key existed in user mappings (not undefined) AND value changed
-                    if (oldVal !== undefined && oldVal !== newVal) {
-                        changes.push({ key, from: oldVal, to: newVal });
-                    }
+                    const oldVal = mappings[key]; const newVal = newMappings[key];
+                    if (oldVal !== undefined && oldVal !== newVal) changes.push({ key, from: oldVal, to: newVal });
                 });
-
                 setMappings(prev => ({ ...prev, ...newMappings }));
-
-                // Only add to log if there are actual modifications
-                if (changes.length > 0) {
-                    setBulkLog(prev => [{
-                        id: Date.now(),
-                        time: new Date().toLocaleTimeString(),
-                        changes
-                    }, ...prev]);
-                }
+                if (changes.length > 0) setBulkLog(prev => [{ id: Date.now(), time: new Date().toLocaleTimeString(), changes }, ...prev]);
             };
 
             const addExtraMapping = (keyName) => setExtraMappings(prev => ({ ...prev, [keyName]: [...(prev[keyName] || []), { path: "", conversions: [] }] }));
             const updateExtraMapping = (keyName, index, value) => setExtraMappings(prev => { const list = [...(prev[keyName] || [])]; if(list[index]) list[index] = {...list[index], path: value}; return { ...prev, [keyName]: list }; });
             const removeExtraMapping = (keyName, index) => setExtraMappings(prev => { const list = [...(prev[keyName] || [])]; list.splice(index, 1); return { ...prev, [keyName]: list }; });
-
             const addConversion = (keyName, f, t) => { if(!f||!t)return; setConversions(prev => ({ ...prev, [keyName]: [...(prev[keyName] || []), { from: f, to: t }] })); };
             const removeConversion = (keyName, i) => setConversions(prev => { const list = [...(prev[keyName] || [])]; list.splice(i, 1); return { ...prev, [keyName]: list }; });
-
             const addExtraConversion = (keyName, eIdx, f, t) => { if(!f||!t)return; setExtraMappings(prev => { const list = [...(prev[keyName] || [])]; const item = {...list[eIdx]}; item.conversions = [...(item.conversions||[]), {from:f, to:t}]; list[eIdx]=item; return {...prev, [keyName]: list}; }); };
             const removeExtraConversion = (keyName, eIdx, cIdx) => setExtraMappings(prev => { const list = [...(prev[keyName] || [])]; const item = {...list[eIdx]}; if(item.conversions){ const nc = [...item.conversions]; nc.splice(cIdx, 1); item.conversions = nc; } list[eIdx]=item; return {...prev, [keyName]: list}; });
-
             const handleCopy = () => { navigator.clipboard.writeText(outputJson).then(() => { setCopySuccess(true); setTimeout(() => setCopySuccess(false), 2000); }); };
 
+            // Reminder Logic
+            const isModuleEmpty = !moduleName;
+
             return (
-                <div className="flex flex-col h-screen p-4 gap-4 overflow-hidden">
+                <div className="flex flex-col h-screen p-4 gap-4 overflow-hidden relative">
                     <header className="flex items-center justify-between border-b border-slate-700 pb-2 shrink-0">
                         <div className="flex items-center gap-3">
-                            <div className="p-2 bg-blue-600 rounded-lg">
-                                <SimpleIcon name="Code" className="text-white" size={20} />
-                            </div>
+                            <div className="p-2 bg-blue-600 rounded-lg"><SimpleIcon name="Code" className="text-white" size={20} /></div>
                             <h1 className="text-lg font-bold text-white">JSON Mapping Config Builder</h1>
                         </div>
-                        <div className="text-xs text-slate-500">v2.8 ECS Type Check</div>
+                        <div className="flex items-center gap-4">
+                            <div className="text-xs text-slate-500">v3.0 Start Fresh</div>
+                            <button onClick={handleResetApp} className="flex items-center gap-1 text-xs bg-red-900/50 hover:bg-red-800 text-red-200 px-2 py-1 rounded border border-red-700/50 transition-colors"><SimpleIcon name="RefreshCw" size={12} /> Reset App</button>
+                        </div>
                     </header>
 
                     <div className="flex flex-1 gap-4 min-h-0">
+                        {/* Left Column */}
                         <div className="w-1/5 flex flex-col gap-2 min-w-[200px]">
                             <div className="flex items-center justify-between">
-                                <label className="flex items-center gap-2 text-xs font-semibold text-blue-400">
-                                    <span className="w-2 h-2 rounded-full bg-blue-400"></span>
-                                    Input (Contains "_temp")
-                                </label>
-                                <button onClick={handleInputNew} className="flex items-center gap-1 bg-blue-600 hover:bg-blue-500 text-white text-[10px] px-2 py-1 rounded transition-colors" title="Save to history & clear input">
-                                    <SimpleIcon name="FilePlus" size={12} /> INPUT NEW
-                                </button>
+                                <label className="flex items-center gap-2 text-xs font-semibold text-blue-400"><span className="w-2 h-2 rounded-full bg-blue-400"></span>Input (Contains "_temp")</label>
+                                <div className="flex items-center gap-1">
+                                    {!inputStr && <button onClick={handleLoadSample} className="text-[9px] bg-slate-800 hover:bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded border border-slate-600 transition-colors">Load Sample</button>}
+                                    <button onClick={handleInputNew} className="flex items-center gap-1 bg-blue-600 hover:bg-blue-500 text-white text-[10px] px-2 py-1 rounded transition-colors"><SimpleIcon name="FilePlus" size={12} /> INPUT NEW</button>
+                                </div>
                             </div>
-                            <div className={`flex-1 relative rounded-xl border transition-colors overflow-hidden ${error ? 'border-red-500/50 bg-red-900/10' : 'border-slate-700 bg-slate-800'}`}>
-                                <textarea className="w-full h-full bg-transparent p-3 font-mono text-xs resize-none focus:outline-none focus:ring-1 focus:ring-blue-500/50 text-slate-400" value={inputStr} onChange={(e) => setInputStr(e.target.value)} placeholder='{"_temp": {"key": "val"}}' spellCheck="false" />
-                                {error && <div className="absolute bottom-2 right-2 text-red-400 text-[10px] flex items-center gap-1 bg-slate-900/90 px-2 py-1 rounded border border-red-500/30"><SimpleIcon name="AlertCircle" size={10} />{error}</div>}
-                            </div>
+                            <div className={`flex-1 relative rounded-xl border transition-colors overflow-hidden ${error?'border-red-500/50 bg-red-900/10':'border-slate-700 bg-slate-800'}`}><textarea className="w-full h-full bg-transparent p-3 font-mono text-xs resize-none focus:outline-none focus:ring-1 focus:ring-blue-500/50 text-slate-400" value={inputStr} onChange={(e) => setInputStr(e.target.value)} placeholder='{"_temp": ...}' spellCheck="false" />{error && <div className="absolute bottom-2 right-2 text-red-400 text-[10px] flex items-center gap-1 bg-slate-900/90 px-2 py-1 rounded border border-red-500/30"><SimpleIcon name="AlertCircle" size={10} />{error}</div>}</div>
                         </div>
 
+                        {/* Middle Column */}
                         <div className="flex-1 flex flex-col gap-3 bg-slate-800/50 p-4 rounded-xl border border-slate-700 shadow-xl min-w-0">
                             <div className="flex items-center justify-between shrink-0">
-                                <div className="flex items-center gap-2 text-sm font-semibold text-purple-400">
-                                    <SimpleIcon name="Settings" size={16} /> Mapping Config
-                                </div>
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 text-sm font-semibold text-purple-400"><SimpleIcon name="Settings" size={16} /> Mapping Config</div>
+                                <div className="flex items-center gap-2 relative">
                                     <div className="flex bg-slate-900 rounded p-0.5 border border-slate-600">
                                         <button onClick={() => setSortOrder('original')} className={`p-1.5 rounded ${sortOrder==='original'?'bg-slate-700 text-white':'text-slate-500 hover:text-slate-300'}`}><SimpleIcon name="List" size={14}/></button>
                                         <button onClick={() => setSortOrder('az')} className={`p-1.5 rounded ${sortOrder==='az'?'bg-slate-700 text-white':'text-slate-500 hover:text-slate-300'}`}><SimpleIcon name="SortAsc" size={14}/></button>
                                     </div>
-                                    <input type="text" value={moduleName} onChange={(e) => setModuleName(e.target.value)} className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs focus:border-purple-500 w-48 text-center" placeholder="Module Name"/>
+                                    <div className="relative">
+                                        <input type="text" value={moduleName} onChange={(e) => setModuleName(e.target.value)} className={`bg-slate-900 border rounded px-2 py-1 text-xs focus:outline-none w-48 text-center transition-all ${isModuleEmpty ? 'border-red-500/50 shadow-[0_0_10px_rgba(239,68,68,0.3)] animate-pulse' : 'border-slate-600 focus:border-purple-500'}`} placeholder="e.g. auth, payment"/>
+                                        {isModuleEmpty && (
+                                            <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 whitespace-nowrap bg-red-600 text-white text-[10px] px-2 py-1 rounded shadow-lg flex items-center animate-bounce">
+                                                <span>👈 Enter Module Name</span>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
-
-                            <div className="bg-slate-800 rounded p-3 border border-slate-700 shrink-0">
-                                <label className="text-xs text-slate-400 block mb-1">Ignore Fields (Comma separated)</label>
-                                <input type="text" value={ignoreStr} onChange={(e) => setIgnoreStr(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-sm focus:border-purple-500 focus:outline-none" placeholder="e.g. password, old_field..." />
-                            </div>
-
-                            <div className="relative shrink-0">
-                                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"><SimpleIcon name="Search" size={14} /></div>
-                                <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Filter fields..." className="w-full bg-slate-900/50 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm focus:border-purple-500 focus:outline-none" />
-                            </div>
-
+                            <div className="bg-slate-800 rounded p-3 border border-slate-700 shrink-0"><label className="text-xs text-slate-400 block mb-1">Ignore Fields (Comma separated)</label><input type="text" value={ignoreStr} onChange={(e) => setIgnoreStr(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-sm focus:border-purple-500 focus:outline-none" placeholder="e.g. password, old_field..." /></div>
+                            <div className="relative shrink-0"><div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"><SimpleIcon name="Search" size={14} /></div><input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Filter fields..." className="w-full bg-slate-900/50 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm focus:border-purple-500 focus:outline-none" /></div>
+                            
                             <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar flex flex-col gap-2">
-                                {mergedKeys.length === 0 ? (
-                                    <div className="text-center py-10 text-slate-500 text-sm italic">Waiting for Input...</div>
-                                ) : filteredKeys.length === 0 ? (
-                                    <div className="text-center py-10 text-slate-500 text-sm italic">All fields hidden by filter.</div>
-                                ) : (
+                                {mergedKeys.length === 0 ? <div className="text-center py-10 text-slate-500 text-sm italic">Waiting for Input...</div> : filteredKeys.length === 0 ? <div className="text-center py-10 text-slate-500 text-sm italic">All fields hidden by filter.</div> : (
                                     filteredKeys.map((k, idx) => {
                                         const isExcluded = excludedKeys[k.name];
                                         const primaryExpanded = expandedPanels[k.name];
@@ -537,69 +456,51 @@
                                         const currentPrefix = moduleName.trim() || 'user';
                                         const currentVal = mappings[k.name] !== undefined ? mappings[k.name] : `${currentPrefix}.${k.name}`;
                                         const isSystemDefault = currentVal === `${currentPrefix}.${k.name}`;
-                                        
                                         const extras = extraMappings[k.name] || [];
                                         
-                                        // Badge Logic
                                         const inCurrent = currentInputKeys.some(ck => ck.name === k.name);
                                         const inHistory = historyFields.has(k.name);
                                         let badge = null;
                                         if (inCurrent && inHistory) badge = <span className="bg-amber-500/20 text-amber-300 text-[9px] font-bold px-1.5 py-0.5 rounded flex items-center animate-fade-in">EXIST</span>;
                                         else if (inCurrent && !inHistory) badge = <span className="bg-blue-500/20 text-blue-300 text-[9px] font-bold px-1.5 py-0.5 rounded flex items-center animate-fade-in">NEW</span>;
-
-                                        // Value Comparison Logic
+                                        
                                         const hasChange = k.oldValue !== undefined && k.newValue !== undefined && k.oldValue !== k.newValue;
-
-                                        // ECS Type Check for Primary Input
+                                        
+                                        // Validation
                                         const primaryEcsType = ECS_NON_KEYWORD_FIELDS[currentVal];
+                                        const primaryValid = validateEcsType(k.sampleValue, primaryEcsType);
 
                                         return (
                                             <div key={`${k.fullPath}-${idx}`} className={`flex flex-col rounded-lg border transition-all ${isExcluded ? 'bg-slate-800/30 border-slate-800 opacity-60' : 'bg-slate-800 border-slate-700 hover:border-purple-500/50'}`}>
                                                 <div className="flex items-center gap-3 p-2 relative">
                                                     <div className="flex-[2] min-w-0 flex flex-col justify-center">
-                                                        <div className="flex items-center gap-2">
-                                                            <button onClick={() => toggleExclude(k.name)} className={`transition-colors ${isExcluded ? 'text-slate-600' : 'text-purple-400 hover:text-purple-300'}`}>
-                                                                {isExcluded ? <SimpleIcon name="EyeOff" size={14} /> : <SimpleIcon name="Eye" size={14} />}
-                                                            </button>
-                                                            <span className={`text-sm font-bold truncate ${isExcluded ? 'line-through text-slate-500' : 'text-purple-300'}`} title={k.name}>{k.name}</span>
-                                                            {badge}
-                                                        </div>
-                                                        
+                                                        <div className="flex items-center gap-2"><button onClick={() => toggleExclude(k.name)} className={`transition-colors ${isExcluded?'text-slate-600':'text-purple-400 hover:text-purple-300'}`}>{isExcluded?<SimpleIcon name="EyeOff" size={14}/>:<SimpleIcon name="Eye" size={14}/>}</button><span className={`text-sm font-bold truncate ${isExcluded?'line-through text-slate-500':'text-purple-300'}`} title={k.name}>{k.name}</span>{badge}</div>
                                                         <div className="ml-6 mt-0.5 text-[10px] text-slate-500 truncate font-mono">
                                                             {hasChange ? (
-                                                                <div className="flex items-center gap-1">
-                                                                    <span className="line-through opacity-50" title={`Old: ${String(k.oldValue)}`}>{String(k.oldValue).slice(0, 15)}{String(k.oldValue).length > 15 ? '...' : ''}</span>
-                                                                    <SimpleIcon name="ArrowRight" size={8} className="opacity-50" />
-                                                                    <span className="text-emerald-400" title={`New: ${String(k.newValue)}`}>{String(k.newValue).slice(0, 20)}{String(k.newValue).length > 20 ? '...' : ''}</span>
-                                                                </div>
-                                                            ) : (
-                                                                <span className="opacity-60" title={String(k.sampleValue)}>
-                                                                    {String(k.sampleValue).slice(0, 35)}{String(k.sampleValue).length > 35 ? '...' : ''}
-                                                                </span>
-                                                            )}
+                                                                <div className="flex items-center gap-1"><span className="line-through opacity-50" title={`Old: ${String(k.oldValue)}`}>{String(k.oldValue).slice(0,15)}{String(k.oldValue).length>15?'...':''}</span><SimpleIcon name="ArrowRight" size={8} className="opacity-50"/><span className="text-emerald-400" title={`New: ${String(k.newValue)}`}>{String(k.newValue).slice(0,20)}{String(k.newValue).length>20?'...':''}</span></div>
+                                                            ) : (<span className="opacity-60" title={String(k.sampleValue)}>{String(k.sampleValue).slice(0,35)}{String(k.sampleValue).length>35?'...':''}</span>)}
                                                         </div>
                                                     </div>
                                                     <SimpleIcon name="ArrowRight" size={12} className="text-slate-600 shrink-0" />
-                                                    
                                                     <div className="flex-[3] relative">
-                                                        <input 
-                                                            type="text" 
-                                                            disabled={isExcluded} 
-                                                            value={currentVal} 
-                                                            onChange={(e) => handleMappingChange(k.name, e.target.value)} 
-                                                            className={`w-full bg-slate-900 border rounded pl-2 pr-16 py-1.5 text-sm focus:outline-none transition-colors ${isExcluded ? 'border-transparent text-slate-600 cursor-not-allowed' : `border-slate-600 focus:border-emerald-500 ${isSystemDefault ? 'text-sky-400' : 'text-emerald-400'}`}`} 
-                                                            placeholder="Target Path" 
-                                                        />
-                                                        {primaryEcsType && (
-                                                            <div className="absolute right-1 top-1/2 -translate-y-1/2 text-[9px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/30 pointer-events-none animate-fade-in select-none">
-                                                                ECS: {primaryEcsType}
-                                                            </div>
-                                                        )}
+                                                        <input type="text" disabled={isExcluded} value={currentVal} onChange={(e) => handleMappingChange(k.name, e.target.value)} className={`w-full bg-slate-900 border rounded pl-2 pr-20 py-1.5 text-sm focus:outline-none transition-colors ${isExcluded?'border-transparent text-slate-600 cursor-not-allowed':`border-slate-600 focus:border-emerald-500 ${isSystemDefault?'text-sky-400':'text-emerald-400'}`}`} placeholder="Target Path" />
+                                                        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                                                            {primaryEcsType && (
+                                                                <div className={`text-[9px] px-1.5 py-0.5 rounded border flex items-center gap-1 cursor-help tooltip-trigger ${!primaryValid ? 'bg-red-500/20 text-red-300 border-red-500/30' : 'bg-amber-500/20 text-amber-300 border-amber-500/30'}`}>
+                                                                    <span>ECS: {primaryEcsType}</span>
+                                                                    {!primaryValid && <SimpleIcon name="AlertTriangle" size={10} className="text-red-400" />}
+                                                                    {!primaryValid && (
+                                                                        <div className="tooltip-content hidden absolute bottom-full right-0 mb-2 w-48 bg-slate-900 border border-red-500/50 text-red-200 p-2 rounded shadow-xl z-10 text-[10px]">
+                                                                            Value <strong>'{String(k.sampleValue).slice(0,10)}'</strong> is not a valid <strong>{primaryEcsType}</strong>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                     </div>
-
                                                     <div className="flex items-center gap-1">
-                                                        <button onClick={() => !isExcluded && addExtraMapping(k.name)} disabled={isExcluded} className={`p-1.5 rounded transition-all text-xs border ${isExcluded ? 'opacity-30 cursor-not-allowed border-slate-700 text-slate-500' : 'bg-slate-700 border-slate-600 text-blue-300 hover:bg-blue-600 hover:text-white hover:border-blue-500'}`}><SimpleIcon name="Plus" size={12} /></button>
-                                                        <button onClick={() => !isExcluded && togglePanel(k.name)} disabled={isExcluded} className={`p-1.5 rounded transition-all flex items-center gap-1 text-xs border ${hasPrimaryConversions ? 'bg-amber-900/30 text-amber-400 border-amber-500/50' : 'bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600'} ${isExcluded ? 'opacity-30 cursor-not-allowed' : ''}`}><SimpleIcon name="Sliders" size={12} /></button>
+                                                        <button onClick={() => !isExcluded && addExtraMapping(k.name)} disabled={isExcluded} className={`p-1.5 rounded transition-all text-xs border ${isExcluded?'opacity-30 cursor-not-allowed border-slate-700 text-slate-500':'bg-slate-700 border-slate-600 text-blue-300 hover:bg-blue-600 hover:text-white hover:border-blue-500'}`}><SimpleIcon name="Plus" size={12}/></button>
+                                                        <button onClick={() => !isExcluded && togglePanel(k.name)} disabled={isExcluded} className={`p-1.5 rounded transition-all flex items-center gap-1 text-xs border ${hasPrimaryConversions?'bg-amber-900/30 text-amber-400 border-amber-500/50':'bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600'} ${isExcluded?'opacity-30 cursor-not-allowed':''}`}><SimpleIcon name="Sliders" size={12}/></button>
                                                     </div>
                                                 </div>
                                                 {primaryExpanded && !isExcluded && (<div className="border-t border-slate-700/50 bg-slate-900/40 p-2 animate-fade-in"><ConversionEditor conversions={conversions[k.name]} onAdd={(f, t) => addConversion(k.name, f, t)} onRemove={(i) => removeConversion(k.name, i)} placeholderPrefix={`p-${k.name}`} /></div>)}
@@ -608,6 +509,7 @@
                                                     const isExtraExpanded = expandedPanels[extraPanelKey];
                                                     const hasExtraConversions = extraObj.conversions && extraObj.conversions.length > 0;
                                                     const extraEcsType = ECS_NON_KEYWORD_FIELDS[extraObj.path];
+                                                    const extraValid = validateEcsType(k.sampleValue, extraEcsType);
 
                                                     return (
                                                         <div key={`extra-${eIdx}`}>
@@ -615,21 +517,17 @@
                                                                 <div className="flex-[2] flex justify-end pr-4"><SimpleIcon name="CornerDownRight" size={14} className="text-slate-600" /></div>
                                                                 <SimpleIcon name="ArrowRight" size={12} className="text-slate-600 shrink-0 opacity-50" />
                                                                 <div className="flex-[3] relative">
-                                                                    <input 
-                                                                        type="text" 
-                                                                        disabled={isExcluded} 
-                                                                        value={extraObj.path} 
-                                                                        onChange={(e) => updateExtraMapping(k.name, eIdx, e.target.value)} 
-                                                                        className={`w-full bg-slate-900/50 border border-slate-700 rounded pl-2 pr-16 py-1.5 text-sm focus:outline-none transition-colors text-emerald-300 focus:border-emerald-500 placeholder-slate-600`} 
-                                                                        placeholder={`${currentPrefix}.${k.name}_copy`} 
-                                                                    />
-                                                                    {extraEcsType && (
-                                                                        <div className="absolute right-1 top-1/2 -translate-y-1/2 text-[9px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/30 pointer-events-none animate-fade-in select-none">
-                                                                            ECS: {extraEcsType}
-                                                                        </div>
-                                                                    )}
+                                                                    <input type="text" disabled={isExcluded} value={extraObj.path} onChange={(e) => updateExtraMapping(k.name, eIdx, e.target.value)} className={`w-full bg-slate-900/50 border border-slate-700 rounded pl-2 pr-20 py-1.5 text-sm focus:outline-none transition-colors text-emerald-300 focus:border-emerald-500 placeholder-slate-600`} placeholder={`${currentPrefix}.${k.name}_copy`} />
+                                                                    <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                                                                        {extraEcsType && (
+                                                                            <div className={`text-[9px] px-1.5 py-0.5 rounded border flex items-center gap-1 cursor-help tooltip-trigger ${!extraValid ? 'bg-red-500/20 text-red-300 border-red-500/30' : 'bg-amber-500/20 text-amber-300 border-amber-500/30'}`}>
+                                                                                <span>ECS: {extraEcsType}</span>
+                                                                                {!extraValid && <SimpleIcon name="AlertTriangle" size={10} className="text-red-400" />}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
                                                                 </div>
-                                                                <div className="flex items-center gap-1 w-[60px]"><button onClick={() => togglePanel(extraPanelKey)} className={`p-1.5 rounded transition-all text-xs border ${hasExtraConversions ? 'bg-amber-900/30 text-amber-400 border-amber-500/50' : 'text-slate-500 hover:text-slate-300 border-transparent hover:border-slate-600'}`}><SimpleIcon name="Sliders" size={12} /></button><button onClick={() => removeExtraMapping(k.name, eIdx)} className="p-1.5 text-slate-500 hover:text-red-400 transition-colors"><SimpleIcon name="Trash" size={12} /></button></div>
+                                                                <div className="flex items-center gap-1 w-[60px]"><button onClick={() => togglePanel(extraPanelKey)} className={`p-1.5 rounded transition-all text-xs border ${hasExtraConversions?'bg-amber-900/30 text-amber-400 border-amber-500/50':'text-slate-500 hover:text-slate-300 border-transparent hover:border-slate-600'}`}><SimpleIcon name="Sliders" size={12}/></button><button onClick={() => removeExtraMapping(k.name, eIdx)} className="p-1.5 text-slate-500 hover:text-red-400 transition-colors"><SimpleIcon name="Trash" size={12}/></button></div>
                                                             </div>
                                                             {isExtraExpanded && (<div className="border-t border-slate-700/50 bg-slate-900/40 p-2 animate-fade-in"><ConversionEditor conversions={extraObj.conversions} onAdd={(f, t) => addExtraConversion(k.name, eIdx, f, t)} onRemove={(i) => removeExtraConversion(k.name, eIdx, i)} placeholderPrefix={`e-${k.name}-${eIdx}`} /></div>)}
                                                         </div>
@@ -642,33 +540,22 @@
                             </div>
                         </div>
 
+                        {/* Right Column */}
                         <div className="w-1/5 flex flex-col gap-2 min-w-[200px]">
                             <label className="flex items-center gap-2 text-xs font-semibold text-amber-400"><span className="w-2 h-2 rounded-full bg-amber-400"></span>Bulk Import (Excel/TSV)</label>
                             <div className="h-1/2 relative rounded-xl border border-slate-700 bg-slate-800 overflow-hidden">
                                 <textarea className="w-full h-full bg-transparent p-3 font-mono text-xs resize-none focus:outline-none focus:ring-1 focus:ring-amber-500/50 text-slate-400" value={bulkMapStr} onChange={(e) => setBulkMapStr(e.target.value)} placeholder={`Paste Excel columns here...\n\nFormat:\nField Name{tab}Target Path\n\nExample:\nusername\tuser.name`} spellCheck="false" />
                                 <button onClick={applyBulkImport} className="absolute bottom-2 right-2 p-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded shadow text-[10px] flex items-center gap-1"><SimpleIcon name="Play" size={10} /> Apply</button>
                             </div>
-                            
                             <div className="flex-1 flex flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-800">
-                                <div className="flex items-center justify-between p-2 border-b border-slate-700 bg-slate-800/50">
-                                    <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400"><SimpleIcon name="History" size={12}/> CHANGE LOG</div>
-                                    {bulkLog.length > 0 && <button onClick={() => setBulkLog([])} className="text-[9px] text-slate-500 hover:text-red-400">Clear</button>}
-                                </div>
+                                <div className="flex items-center justify-between p-2 border-b border-slate-700 bg-slate-800/50"><div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400"><SimpleIcon name="History" size={12}/> CHANGE LOG</div>{bulkLog.length > 0 && <button onClick={() => setBulkLog([])} className="text-[9px] text-slate-500 hover:text-red-400">Clear</button>}</div>
                                 <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
-                                    {bulkLog.length === 0 ? (
-                                        <div className="text-center text-[10px] text-slate-600 py-4 italic">No modifications yet</div>
-                                    ) : (
-                                        bulkLog.map(log => (
-                                            <div key={log.id} className="text-[10px] border-l-2 border-amber-500 pl-2 bg-amber-500/5 p-1.5 rounded">
-                                                <div className="text-slate-500 text-[9px] mb-1 flex justify-between"><span>{log.time}</span><span className="text-amber-500">{log.changes.length} Mods</span></div>
-                                                {log.changes.map((change, idx) => (
-                                                    <div key={idx} className="text-slate-300 truncate">
-                                                        <span className="font-mono text-amber-400">{change.key}</span>: <span className="line-through opacity-50">{change.from}</span> &rarr; <span className="text-emerald-400">{change.to}</span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        ))
-                                    )}
+                                    {bulkLog.length === 0 ? <div className="text-center text-[10px] text-slate-600 py-4 italic">No modifications yet</div> : bulkLog.map(log => (
+                                        <div key={log.id} className="text-[10px] border-l-2 border-amber-500 pl-2 bg-amber-500/5 p-1.5 rounded">
+                                            <div className="text-slate-500 text-[9px] mb-1 flex justify-between"><span>{log.time}</span><span className="text-amber-500">{log.changes.length} Mods</span></div>
+                                            {log.changes.map((change, idx) => <div key={idx} className="text-slate-300 truncate"><span className="font-mono text-amber-400">{change.key}</span>: <span className="line-through opacity-50">{change.from}</span> &rarr; <span className="text-emerald-400">{change.to}</span></div>)}
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
                         </div>
