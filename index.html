@@ -39,7 +39,6 @@
             </svg>
         );
 
-        // Fixed: Wrapped multi-element icons in Fragments <>...</>
         const Icons = {
             Code: <path d="m18 16 4-4-4-4M6 8l-4 4 4 4m6-8-4 8"/>,
             Settings: <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.39a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/>,
@@ -69,7 +68,7 @@
         // --- Helper: Find _temp recursively ---
         const findTempObject = (obj) => {
             if (!obj || typeof obj !== 'object') return null;
-            if (Array.isArray(obj)) return null; // Assuming _temp is in an object, not array
+            if (Array.isArray(obj)) return null;
 
             // Direct check
             if ('_temp' in obj) return obj['_temp'];
@@ -118,7 +117,6 @@
             const handleAddDefault = () => {
                 setNewFrom("default");
                 setNewTo("");
-                // Focus on To input
                 if (toInputRef.current) {
                     toInputRef.current.focus();
                 }
@@ -137,7 +135,6 @@
                     ))}
                     
                     <div className="flex items-center gap-2 bg-slate-900/50 p-1 rounded border border-slate-700/50">
-                        {/* From Input */}
                         <div className="flex-1 min-w-0 relative">
                              <input 
                                 value={newFrom}
@@ -149,7 +146,6 @@
                        
                         <SimpleIcon name="ArrowRight" size={10} className="text-slate-500" />
                         
-                        {/* To Input */}
                         <input 
                             ref={toInputRef}
                             value={newTo}
@@ -161,7 +157,6 @@
                             }}
                         />
 
-                        {/* Default Button */}
                         <button 
                             onClick={handleAddDefault}
                             className="p-1 px-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-amber-500 text-[10px] rounded transition-colors"
@@ -170,7 +165,6 @@
                             Default
                         </button>
 
-                        {/* Add Button */}
                         <button 
                             onClick={handleAdd}
                             className="p-1 bg-slate-700 hover:bg-amber-600 hover:text-white text-slate-300 rounded transition-colors"
@@ -197,18 +191,18 @@
 
             // States
             const [inputStr, setInputStr] = useState(initialInput);
-            const [bulkMapStr, setBulkMapStr] = useState(""); // State for bulk mapping input
+            const [bulkMapStr, setBulkMapStr] = useState("");
             const [moduleName, setModuleName] = useState("{module.name}");
             const [ignoreStr, setIgnoreStr] = useState("password, v, deprecated_field");
             const [parsedJson, setParsedJson] = useState(null);
             const [error, setError] = useState(null);
-            const [sortOrder, setSortOrder] = useState('original'); // 'original' | 'az'
+            const [sortOrder, setSortOrder] = useState('original');
             
             // Mappings & Config
             const [mappings, setMappings] = useState({}); 
             const [extraMappings, setExtraMappings] = useState({}); 
             const [excludedKeys, setExcludedKeys] = useState({});
-            const [conversions, setConversions] = useState({}); // Primary conversions
+            const [conversions, setConversions] = useState({});
             const [expandedPanels, setExpandedPanels] = useState({}); 
             
             const [copySuccess, setCopySuccess] = useState(false);
@@ -219,7 +213,7 @@
                 return ignoreStr.split(/[,，\n]+/).map(s => s.trim()).filter(s => s);
             }, [ignoreStr]);
 
-            // 1. Listen to input changes & parse JSON (Strictly finding _temp)
+            // 1. Listen to input changes
             useEffect(() => {
                 try {
                     if (!inputStr.trim()) {
@@ -228,7 +222,6 @@
                         return;
                     }
                     const rawParsed = JSON.parse(inputStr);
-                    // Find _temp specifically
                     const tempObj = findTempObject(rawParsed);
                     
                     if (tempObj) {
@@ -236,8 +229,6 @@
                         setError(null);
                     } else {
                         setParsedJson(null);
-                        // Optional: Show warning that no _temp was found, or just show nothing
-                        // keeping it simple for now, maybe set an error state to hint user
                         setError("找不到 '_temp' 物件 (Missing _temp object)");
                     }
                 } catch (e) {
@@ -252,30 +243,53 @@
                 return extractKeys(parsedJson);
             }, [parsedJson]);
 
-            // 3. Filter & Sort keys
+            // 3. Filter & Sort keys (Enhanced Search Logic)
             const filteredKeys = useMemo(() => {
+                const searchLower = searchTerm.toLowerCase();
+                const currentPrefix = moduleName.trim() || 'user';
+
                 let keys = currentKeys.filter(k => {
-                    const matchesSearch = k.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                                          k.fullPath.toLowerCase().includes(searchTerm.toLowerCase());
                     const isIgnored = ignoreList.includes(k.name);
-                    return matchesSearch && !isIgnored;
+                    if (isIgnored) return false;
+
+                    // If no search term, show all valid keys
+                    if (!searchLower) return true;
+
+                    // 1. Search Source Name
+                    if (k.name.toLowerCase().includes(searchLower)) return true;
+                    
+                    // 2. Search Source Path
+                    if (k.fullPath.toLowerCase().includes(searchLower)) return true;
+
+                    // 3. Search Target Name (Current Mapped Value)
+                    const userDefined = mappings[k.name];
+                    const effectiveTarget = userDefined !== undefined ? userDefined : `${currentPrefix}.${k.name}`;
+                    if (effectiveTarget.toLowerCase().includes(searchLower)) return true;
+
+                    // 4. Search Extra Mappings Targets
+                    if (extraMappings[k.name] && Array.isArray(extraMappings[k.name])) {
+                        const hasMatchInExtras = extraMappings[k.name].some(ex => 
+                            ex.path && ex.path.toLowerCase().includes(searchLower)
+                        );
+                        if (hasMatchInExtras) return true;
+                    }
+
+                    return false;
                 });
 
                 // Apply Sorting
                 if (sortOrder === 'az') {
                     keys.sort((a, b) => a.name.localeCompare(b.name));
                 }
-                // 'original' doesn't need sort as it comes from extraction order
 
                 return keys;
-            }, [currentKeys, searchTerm, ignoreList, sortOrder]);
+            }, [currentKeys, searchTerm, ignoreList, sortOrder, mappings, moduleName, extraMappings]);
 
             // 4. Generate Output JSON
             const outputJson = useMemo(() => {
                 const prefix = moduleName.trim() || 'user';
                 const directory = [];
 
-                // Use filteredKeys logic but strictly for output generation we usually want all NON-IGNORED/NON-EXCLUDED keys.
                 let processKeys = currentKeys.filter(k => !ignoreList.includes(k.name) && !excludedKeys[k.name]);
                 
                 if (sortOrder === 'az') {
@@ -341,7 +355,18 @@
 
             // Handlers
             const handleMappingChange = (keyName, newValue) => {
-                setMappings(prev => ({ ...prev, [keyName]: newValue }));
+                const currentPrefix = moduleName.trim() || 'user';
+                const defaultTo = `${currentPrefix}.${keyName}`;
+
+                if (newValue === defaultTo) {
+                    setMappings(prev => {
+                        const next = { ...prev };
+                        delete next[keyName];
+                        return next;
+                    });
+                } else {
+                    setMappings(prev => ({ ...prev, [keyName]: newValue }));
+                }
             };
 
             const toggleExclude = (keyName) => {
@@ -352,7 +377,6 @@
                 setExpandedPanels(prev => ({ ...prev, [panelId]: !prev[panelId] }));
             };
 
-            // Bulk Import Handler
             const handleBulkImport = (value) => {
                 setBulkMapStr(value);
                 const lines = value.split('\n');
@@ -368,16 +392,11 @@
                     }
                 });
                 
-                // Auto fill into mappings
                 if (Object.keys(newMappings).length > 0) {
-                    setMappings(prev => ({
-                        ...prev,
-                        ...newMappings
-                    }));
+                    setMappings(prev => ({ ...prev, ...newMappings }));
                 }
             };
 
-            // Extra Mapping Handlers
             const addExtraMapping = (keyName) => {
                 setExtraMappings(prev => ({
                     ...prev,
@@ -403,7 +422,6 @@
                 });
             };
 
-            // Primary Conversion Handlers
             const addConversion = (keyName, fromVal, toVal) => {
                 if (!fromVal || !toVal) return;
                 setConversions(prev => ({
@@ -420,7 +438,6 @@
                 });
             };
 
-            // Extra Conversion Handlers
             const addExtraConversion = (keyName, extraIdx, fromVal, toVal) => {
                 if (!fromVal || !toVal) return;
                 setExtraMappings(prev => {
@@ -464,7 +481,7 @@
                             </div>
                             <h1 className="text-lg font-bold text-white">JSON Mapping Config Builder</h1>
                         </div>
-                        <div className="text-xs text-slate-500">v1.7 Bulk Import</div>
+                        <div className="text-xs text-slate-500">v2.0 Enhanced Search</div>
                     </header>
 
                     {/* Top Section */}
@@ -502,7 +519,6 @@
                                 </div>
                                 
                                 <div className="flex items-center gap-2">
-                                    {/* Sort Toggles */}
                                     <div className="flex bg-slate-900 rounded p-0.5 border border-slate-600">
                                         <button 
                                             onClick={() => setSortOrder('original')}
@@ -607,7 +623,7 @@
                                                             disabled={isExcluded}
                                                             value={mappings[k.name] !== undefined ? mappings[k.name] : `${currentPrefix}.${k.name}`}
                                                             onChange={(e) => handleMappingChange(k.name, e.target.value)}
-                                                            className={`w-full bg-slate-900 border rounded px-2 py-1.5 text-sm focus:outline-none transition-colors ${isExcluded ? 'border-transparent text-slate-600 cursor-not-allowed' : 'border-slate-600 text-emerald-400 focus:border-emerald-500'}`}
+                                                            className={`w-full bg-slate-900 border rounded px-2 py-1.5 text-sm focus:outline-none transition-colors ${isExcluded ? 'border-transparent text-slate-600 cursor-not-allowed' : `border-slate-600 focus:border-emerald-500 ${mappings[k.name] !== undefined ? 'text-emerald-400' : 'text-sky-400'}`}`}
                                                             placeholder="Target Path"
                                                         />
                                                     </div>
