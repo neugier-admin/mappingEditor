@@ -39,6 +39,7 @@
             </svg>
         );
 
+        // Fixed: Wrapped multi-element icons in Fragments <>...</>
         const Icons = {
             Code: <path d="m18 16 4-4-4-4M6 8l-4 4 4 4m6-8-4 8"/>,
             Settings: <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.39a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/>,
@@ -481,7 +482,7 @@
                             </div>
                             <h1 className="text-lg font-bold text-white">JSON Mapping Config Builder</h1>
                         </div>
-                        <div className="text-xs text-slate-500">v2.0 Enhanced Search</div>
+                        <div className="text-xs text-slate-500">v2.1 Simplified Color Logic</div>
                     </header>
 
                     {/* Top Section */}
@@ -590,6 +591,10 @@
                                         const currentPrefix = moduleName.trim() || 'user';
                                         
                                         const extras = extraMappings[k.name] || [];
+                                        
+                                        // Simplified Logic: Blue if value == {module}.{field}, else Green
+                                        const currentVal = mappings[k.name] !== undefined ? mappings[k.name] : `${currentPrefix}.${k.name}`;
+                                        const isSystemDefault = currentVal === `${currentPrefix}.${k.name}`;
 
                                         return (
                                             <div key={`${k.fullPath}-${idx}`} className={`flex flex-col rounded-lg border transition-all ${isExcluded ? 'bg-slate-800/30 border-slate-800 opacity-60' : 'bg-slate-800 border-slate-700 hover:border-purple-500/50'}`}>
@@ -623,7 +628,7 @@
                                                             disabled={isExcluded}
                                                             value={mappings[k.name] !== undefined ? mappings[k.name] : `${currentPrefix}.${k.name}`}
                                                             onChange={(e) => handleMappingChange(k.name, e.target.value)}
-                                                            className={`w-full bg-slate-900 border rounded px-2 py-1.5 text-sm focus:outline-none transition-colors ${isExcluded ? 'border-transparent text-slate-600 cursor-not-allowed' : `border-slate-600 focus:border-emerald-500 ${mappings[k.name] !== undefined ? 'text-emerald-400' : 'text-sky-400'}`}`}
+                                                            className={`w-full bg-slate-900 border rounded px-2 py-1.5 text-sm focus:outline-none transition-colors ${isExcluded ? 'border-transparent text-slate-600 cursor-not-allowed' : `border-slate-600 focus:border-emerald-500 ${isSystemDefault ? 'text-sky-400' : 'text-emerald-400'}`}`}
                                                             placeholder="Target Path"
                                                         />
                                                     </div>
