@@ -145,15 +145,21 @@
 
             // 5. Generate Output JSON
             const outputJson = useMemo(() => {
+                // Determine prefix based on Module Name
+                const prefix = moduleName.trim() || 'user';
+
                 // Generate Directory
                 // Only include keys that are NOT in the ignoreList AND NOT excluded via UI toggle
                 const directory = currentKeys
                     .filter(k => !ignoreList.includes(k.name) && !excludedKeys[k.name]) 
                     .map(k => {
                         const userDefinedTo = mappings[k.name] || "";
+                        // Use dynamic prefix
+                        const defaultTo = `${prefix}.${k.name}`;
+                        
                         const entry = {
                             name: k.name,
-                            to: userDefinedTo || `user.${k.name}`
+                            to: userDefinedTo || defaultTo
                         };
 
                         if (conversions[k.name] && conversions[k.name].length > 0) {
@@ -311,6 +317,9 @@
                                         const isExpanded = expandedPanels[k.name];
                                         const hasConversions = conversions[k.name] && conversions[k.name].length > 0;
                                         
+                                        // Calculate current default prefix
+                                        const currentPrefix = moduleName.trim() || 'user';
+
                                         return (
                                             <div key={`${k.fullPath}-${idx}`} className={`flex flex-col rounded-lg border transition-all ${isExcluded ? 'bg-slate-800/30 border-slate-800 opacity-60' : 'bg-slate-800 border-slate-700 hover:border-purple-500/50'}`}>
                                                 <div className="flex items-center gap-3 p-2">
@@ -339,7 +348,8 @@
                                                         <input 
                                                             type="text"
                                                             disabled={isExcluded}
-                                                            value={mappings[k.name] !== undefined ? mappings[k.name] : `user.${k.name}`}
+                                                            // Updated logic: Default is now {moduleName}.{fieldName}
+                                                            value={mappings[k.name] !== undefined ? mappings[k.name] : `${currentPrefix}.${k.name}`}
                                                             onChange={(e) => handleMappingChange(k.name, e.target.value)}
                                                             className={`w-full bg-slate-900 border rounded px-2 py-1.5 text-sm focus:outline-none transition-colors ${isExcluded ? 'border-transparent text-slate-600 cursor-not-allowed' : 'border-slate-600 text-emerald-400 focus:border-emerald-500'}`}
                                                             placeholder="Target Path"
