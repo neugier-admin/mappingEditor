@@ -32,6 +32,74 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo, useRef } = React;
 
+        // --- ECS Reference Data (Non-Keyword Fields) ---
+        const ECS_NON_KEYWORD_FIELDS = {
+            // Date
+            "@timestamp": "date",
+            "event.created": "date",
+            "event.ingested": "date",
+            "event.start": "date",
+            "event.end": "date",
+            "file.created": "date",
+            "file.accessed": "date",
+            "file.mtime": "date",
+            "file.ctime": "date",
+            "process.start": "date",
+            "process.end": "date",
+            "tls.client.not_after": "date",
+            "tls.client.not_before": "date",
+            "tls.server.not_after": "date",
+            "tls.server.not_before": "date",
+            
+            // IP
+            "source.ip": "ip",
+            "destination.ip": "ip",
+            "client.ip": "ip",
+            "server.ip": "ip",
+            "host.ip": "ip",
+            "network.forwarded_ip": "ip",
+            "related.ip": "ip",
+            "dns.resolved_ip": "ip",
+
+            // Long / Integer
+            "source.port": "long",
+            "destination.port": "long",
+            "client.port": "long",
+            "server.port": "long",
+            "source.bytes": "long",
+            "destination.bytes": "long",
+            "client.bytes": "long",
+            "server.bytes": "long",
+            "source.packets": "long",
+            "destination.packets": "long",
+            "client.packets": "long",
+            "server.packets": "long",
+            "network.bytes": "long",
+            "network.packets": "long",
+            "event.duration": "long",
+            "event.sequence": "long",
+            "http.request.bytes": "long",
+            "http.response.bytes": "long",
+            "http.response.status_code": "long",
+            "process.pid": "long",
+            "process.parent.pid": "long",
+            "process.thread.id": "long",
+            "process.exit_code": "long",
+            "process.uptime": "long",
+            "host.uptime": "long",
+            "file.size": "long",
+            "url.port": "long",
+
+            // Float
+            "event.risk_score": "float",
+            "event.risk_score_norm": "float",
+
+            // Text / Match Only Text
+            "message": "text",
+            "error.message": "text",
+            "event.original": "text"
+        };
+
         // --- Icons Components ---
         const Icon = ({ path, size = 16, className = "" }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -412,7 +480,7 @@
                             </div>
                             <h1 className="text-lg font-bold text-white">JSON Mapping Config Builder</h1>
                         </div>
-                        <div className="text-xs text-slate-500">v2.7 Log Only Mods</div>
+                        <div className="text-xs text-slate-500">v2.8 ECS Type Check</div>
                     </header>
 
                     <div className="flex flex-1 gap-4 min-h-0">
@@ -482,6 +550,9 @@
                                         // Value Comparison Logic
                                         const hasChange = k.oldValue !== undefined && k.newValue !== undefined && k.oldValue !== k.newValue;
 
+                                        // ECS Type Check for Primary Input
+                                        const primaryEcsType = ECS_NON_KEYWORD_FIELDS[currentVal];
+
                                         return (
                                             <div key={`${k.fullPath}-${idx}`} className={`flex flex-col rounded-lg border transition-all ${isExcluded ? 'bg-slate-800/30 border-slate-800 opacity-60' : 'bg-slate-800 border-slate-700 hover:border-purple-500/50'}`}>
                                                 <div className="flex items-center gap-3 p-2 relative">
@@ -509,9 +580,23 @@
                                                         </div>
                                                     </div>
                                                     <SimpleIcon name="ArrowRight" size={12} className="text-slate-600 shrink-0" />
-                                                    <div className="flex-[3]">
-                                                        <input type="text" disabled={isExcluded} value={mappings[k.name] !== undefined ? mappings[k.name] : `${currentPrefix}.${k.name}`} onChange={(e) => handleMappingChange(k.name, e.target.value)} className={`w-full bg-slate-900 border rounded px-2 py-1.5 text-sm focus:outline-none transition-colors ${isExcluded ? 'border-transparent text-slate-600 cursor-not-allowed' : `border-slate-600 focus:border-emerald-500 ${isSystemDefault ? 'text-sky-400' : 'text-emerald-400'}`}`} placeholder="Target Path" />
+                                                    
+                                                    <div className="flex-[3] relative">
+                                                        <input 
+                                                            type="text" 
+                                                            disabled={isExcluded} 
+                                                            value={currentVal} 
+                                                            onChange={(e) => handleMappingChange(k.name, e.target.value)} 
+                                                            className={`w-full bg-slate-900 border rounded pl-2 pr-16 py-1.5 text-sm focus:outline-none transition-colors ${isExcluded ? 'border-transparent text-slate-600 cursor-not-allowed' : `border-slate-600 focus:border-emerald-500 ${isSystemDefault ? 'text-sky-400' : 'text-emerald-400'}`}`} 
+                                                            placeholder="Target Path" 
+                                                        />
+                                                        {primaryEcsType && (
+                                                            <div className="absolute right-1 top-1/2 -translate-y-1/2 text-[9px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/30 pointer-events-none animate-fade-in select-none">
+                                                                ECS: {primaryEcsType}
+                                                            </div>
+                                                        )}
                                                     </div>
+
                                                     <div className="flex items-center gap-1">
                                                         <button onClick={() => !isExcluded && addExtraMapping(k.name)} disabled={isExcluded} className={`p-1.5 rounded transition-all text-xs border ${isExcluded ? 'opacity-30 cursor-not-allowed border-slate-700 text-slate-500' : 'bg-slate-700 border-slate-600 text-blue-300 hover:bg-blue-600 hover:text-white hover:border-blue-500'}`}><SimpleIcon name="Plus" size={12} /></button>
                                                         <button onClick={() => !isExcluded && togglePanel(k.name)} disabled={isExcluded} className={`p-1.5 rounded transition-all flex items-center gap-1 text-xs border ${hasPrimaryConversions ? 'bg-amber-900/30 text-amber-400 border-amber-500/50' : 'bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600'} ${isExcluded ? 'opacity-30 cursor-not-allowed' : ''}`}><SimpleIcon name="Sliders" size={12} /></button>
@@ -522,12 +607,28 @@
                                                     const extraPanelKey = `${k.name}-extra-${eIdx}`;
                                                     const isExtraExpanded = expandedPanels[extraPanelKey];
                                                     const hasExtraConversions = extraObj.conversions && extraObj.conversions.length > 0;
+                                                    const extraEcsType = ECS_NON_KEYWORD_FIELDS[extraObj.path];
+
                                                     return (
                                                         <div key={`extra-${eIdx}`}>
                                                             <div className="flex items-center gap-3 p-2 pt-0 relative animate-fade-in">
                                                                 <div className="flex-[2] flex justify-end pr-4"><SimpleIcon name="CornerDownRight" size={14} className="text-slate-600" /></div>
                                                                 <SimpleIcon name="ArrowRight" size={12} className="text-slate-600 shrink-0 opacity-50" />
-                                                                <div className="flex-[3]"><input type="text" disabled={isExcluded} value={extraObj.path} onChange={(e) => updateExtraMapping(k.name, eIdx, e.target.value)} className={`w-full bg-slate-900/50 border border-slate-700 rounded px-2 py-1.5 text-sm focus:outline-none transition-colors text-emerald-300 focus:border-emerald-500 placeholder-slate-600`} placeholder={`${currentPrefix}.${k.name}_copy`} /></div>
+                                                                <div className="flex-[3] relative">
+                                                                    <input 
+                                                                        type="text" 
+                                                                        disabled={isExcluded} 
+                                                                        value={extraObj.path} 
+                                                                        onChange={(e) => updateExtraMapping(k.name, eIdx, e.target.value)} 
+                                                                        className={`w-full bg-slate-900/50 border border-slate-700 rounded pl-2 pr-16 py-1.5 text-sm focus:outline-none transition-colors text-emerald-300 focus:border-emerald-500 placeholder-slate-600`} 
+                                                                        placeholder={`${currentPrefix}.${k.name}_copy`} 
+                                                                    />
+                                                                    {extraEcsType && (
+                                                                        <div className="absolute right-1 top-1/2 -translate-y-1/2 text-[9px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/30 pointer-events-none animate-fade-in select-none">
+                                                                            ECS: {extraEcsType}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
                                                                 <div className="flex items-center gap-1 w-[60px]"><button onClick={() => togglePanel(extraPanelKey)} className={`p-1.5 rounded transition-all text-xs border ${hasExtraConversions ? 'bg-amber-900/30 text-amber-400 border-amber-500/50' : 'text-slate-500 hover:text-slate-300 border-transparent hover:border-slate-600'}`}><SimpleIcon name="Sliders" size={12} /></button><button onClick={() => removeExtraMapping(k.name, eIdx)} className="p-1.5 text-slate-500 hover:text-red-400 transition-colors"><SimpleIcon name="Trash" size={12} /></button></div>
                                                             </div>
                                                             {isExtraExpanded && (<div className="border-t border-slate-700/50 bg-slate-900/40 p-2 animate-fade-in"><ConversionEditor conversions={extraObj.conversions} onAdd={(f, t) => addExtraConversion(k.name, eIdx, f, t)} onRemove={(i) => removeExtraConversion(k.name, eIdx, i)} placeholderPrefix={`e-${k.name}-${eIdx}`} /></div>)}
