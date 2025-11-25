@@ -22,15 +22,17 @@
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(71, 85, 105, 0.8); border-radius: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, 0.8); }
         textarea:focus, input:focus { outline: none; }
+        .animate-fade-in { animation: fadeIn 0.2s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body>
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useMemo } = React;
+        const { useState, useEffect, useMemo, useRef } = React;
 
-        // --- Icons Components (Simple SVGs to avoid dependency issues) ---
+        // --- Icons Components ---
         const Icon = ({ path, size = 16, className = "" }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
                 {path}
@@ -51,12 +53,133 @@
             ArrowRightLeft: <><path d="m16 3 4 4-4 4"/><path d="M20 7H4"/><path d="m8 21-4-4 4-4"/><path d="M4 17h16"/></>,
             Plus: <><path d="M5 12h14"/><path d="M12 5v14"/></>,
             X: <><path d="M18 6 6 18"/><path d="m6 6 12 12"/></>,
-            AlertCircle: <><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></>
+            AlertCircle: <><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></>,
+            CornerDownRight: <><polyline points="15 10 20 15 15 20"/><path d="M4 4v7a4 4 0 0 0 4 4h12"/></>,
+            Trash: <><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></>,
+            SortAsc: <><path d="M11 5h10"/><path d="M11 9h7"/><path d="M11 13h4"/><path d="M3 17l3 3 3-3"/><path d="M6 18V4"/></>,
+            List: <><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></>,
+            Flag: <><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></>
         };
 
         const SimpleIcon = ({ name, size, className }) => (
-            <Icon path={Icons[name]} size={size} className={className} />
+            <Icon path={Icons[name] || Icons.Code} size={size} className={className} />
         );
+
+        // --- Helper: Find _temp recursively ---
+        const findTempObject = (obj) => {
+            if (!obj || typeof obj !== 'object') return null;
+            if (Array.isArray(obj)) return null; // Assuming _temp is in an object, not array
+
+            // Direct check
+            if ('_temp' in obj) return obj['_temp'];
+
+            // Recursive check
+            for (const key in obj) {
+                if (typeof obj[key] === 'object' && obj[key] !== null) {
+                    const found = findTempObject(obj[key]);
+                    if (found) return found;
+                }
+            }
+            return null;
+        };
+
+        // --- Helper: Extract Keys ---
+        const extractKeys = (obj, prefix = '') => {
+            let keys = [];
+            for (const key in obj) {
+                if (typeof obj[key] === 'object' && obj[key] !== null && !Array.isArray(obj[key])) {
+                    keys = keys.concat(extractKeys(obj[key], prefix ? `${prefix}.${key}` : key));
+                } else {
+                    keys.push({
+                        fullPath: prefix ? `${prefix}.${key}` : key,
+                        name: key,
+                        sampleValue: obj[key]
+                    });
+                }
+            }
+            return keys;
+        };
+
+        // --- Conversion Component ---
+        const ConversionEditor = ({ conversions, onAdd, onRemove, placeholderPrefix }) => {
+            const [newFrom, setNewFrom] = useState("");
+            const [newTo, setNewTo] = useState("");
+            const toInputRef = useRef(null);
+
+            const handleAdd = () => {
+                if (newFrom && newTo) {
+                    onAdd(newFrom, newTo);
+                    setNewFrom("");
+                    setNewTo("");
+                }
+            };
+
+            const handleAddDefault = () => {
+                setNewFrom("default");
+                setNewTo("");
+                // Focus on To input
+                if (toInputRef.current) {
+                    toInputRef.current.focus();
+                }
+            };
+
+            return (
+                <div className="space-y-2 pl-8"> 
+                    <div className="text-[10px] text-amber-500 font-semibold mb-1">VALUE CONVERSIONS</div>
+                    {conversions?.map((c, cIdx) => (
+                        <div key={cIdx} className="flex items-center gap-2 text-xs">
+                            <div className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-300 text-center">{c.from}</div>
+                            <SimpleIcon name="ArrowRight" size={10} className="text-slate-600" />
+                            <div className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-emerald-300 text-center">{c.to}</div>
+                            <button onClick={() => onRemove(cIdx)} className="text-slate-500 hover:text-red-400"><SimpleIcon name="X" size={12} /></button>
+                        </div>
+                    ))}
+                    
+                    <div className="flex items-center gap-2 bg-slate-900/50 p-1 rounded border border-slate-700/50">
+                        {/* From Input */}
+                        <div className="flex-1 min-w-0 relative">
+                             <input 
+                                value={newFrom}
+                                onChange={(e) => setNewFrom(e.target.value)}
+                                placeholder="From" 
+                                className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs focus:border-amber-500 outline-none" 
+                            />
+                        </div>
+                       
+                        <SimpleIcon name="ArrowRight" size={10} className="text-slate-500" />
+                        
+                        {/* To Input */}
+                        <input 
+                            ref={toInputRef}
+                            value={newTo}
+                            onChange={(e) => setNewTo(e.target.value)}
+                            placeholder="To" 
+                            className="flex-1 min-w-0 bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs focus:border-amber-500 outline-none" 
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleAdd();
+                            }}
+                        />
+
+                        {/* Default Button */}
+                        <button 
+                            onClick={handleAddDefault}
+                            className="p-1 px-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-amber-500 text-[10px] rounded transition-colors"
+                            title="Set Default Value"
+                        >
+                            Default
+                        </button>
+
+                        {/* Add Button */}
+                        <button 
+                            onClick={handleAdd}
+                            className="p-1 bg-slate-700 hover:bg-amber-600 hover:text-white text-slate-300 rounded transition-colors"
+                        >
+                            <SimpleIcon name="Plus" size={12} />
+                        </button>
+                    </div>
+                </div>
+            );
+        };
 
         // --- Main Application ---
         function App() {
@@ -77,22 +200,24 @@
             const [ignoreStr, setIgnoreStr] = useState("password, v, deprecated_field");
             const [parsedJson, setParsedJson] = useState(null);
             const [error, setError] = useState(null);
+            const [sortOrder, setSortOrder] = useState('original'); // 'original' | 'az'
             
             // Mappings & Config
             const [mappings, setMappings] = useState({}); 
-            const [excludedKeys, setExcludedKeys] = useState({}); // UI Exclude (Eye toggle)
-            const [conversions, setConversions] = useState({});
-            const [expandedPanels, setExpandedPanels] = useState({});
+            const [extraMappings, setExtraMappings] = useState({}); 
+            const [excludedKeys, setExcludedKeys] = useState({});
+            const [conversions, setConversions] = useState({}); // Primary conversions
+            const [expandedPanels, setExpandedPanels] = useState({}); 
             
             const [copySuccess, setCopySuccess] = useState(false);
             const [searchTerm, setSearchTerm] = useState("");
 
-            // Parse Ignore List (Common Logic)
+            // Parse Ignore List
             const ignoreList = useMemo(() => {
                 return ignoreStr.split(/[,，\n]+/).map(s => s.trim()).filter(s => s);
             }, [ignoreStr]);
 
-            // 1. Listen to input changes & parse JSON
+            // 1. Listen to input changes & parse JSON (Strictly finding _temp)
             useEffect(() => {
                 try {
                     if (!inputStr.trim()) {
@@ -100,81 +225,115 @@
                         setError(null);
                         return;
                     }
-                    const parsed = JSON.parse(inputStr);
-                    setParsedJson(parsed);
-                    setError(null);
+                    const rawParsed = JSON.parse(inputStr);
+                    // Find _temp specifically
+                    const tempObj = findTempObject(rawParsed);
+                    
+                    if (tempObj) {
+                        setParsedJson(tempObj);
+                        setError(null);
+                    } else {
+                        setParsedJson(null);
+                        // Optional: Show warning that no _temp was found, or just show nothing
+                        // keeping it simple for now, maybe set an error state to hint user
+                        setError("找不到 '_temp' 物件 (Missing _temp object)");
+                    }
                 } catch (e) {
                     setError("JSON 格式錯誤");
                     setParsedJson(null);
                 }
             }, [inputStr]);
 
-            // 2. Extract Keys recursively
-            const extractKeys = (obj, prefix = '') => {
-                let keys = [];
-                for (const key in obj) {
-                    if (typeof obj[key] === 'object' && obj[key] !== null && !Array.isArray(obj[key])) {
-                        keys = keys.concat(extractKeys(obj[key], prefix ? `${prefix}.${key}` : key));
-                    } else {
-                        keys.push({
-                            fullPath: prefix ? `${prefix}.${key}` : key,
-                            name: key,
-                            sampleValue: obj[key]
-                        });
-                    }
-                }
-                return keys;
-            };
-
-            // 3. Compute current keys
+            // 2. Compute current keys
             const currentKeys = useMemo(() => {
                 if (!parsedJson) return [];
                 return extractKeys(parsedJson);
             }, [parsedJson]);
 
-            // 4. Filter keys for UI
-            // Logic: Filter by search AND remove items that are in the Ignore List
+            // 3. Filter & Sort keys
             const filteredKeys = useMemo(() => {
-                return currentKeys.filter(k => {
+                let keys = currentKeys.filter(k => {
                     const matchesSearch = k.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
                                           k.fullPath.toLowerCase().includes(searchTerm.toLowerCase());
                     const isIgnored = ignoreList.includes(k.name);
                     return matchesSearch && !isIgnored;
                 });
-            }, [currentKeys, searchTerm, ignoreList]);
 
-            // 5. Generate Output JSON
+                // Apply Sorting
+                if (sortOrder === 'az') {
+                    keys.sort((a, b) => a.name.localeCompare(b.name));
+                }
+                // 'original' doesn't need sort as it comes from extraction order
+
+                return keys;
+            }, [currentKeys, searchTerm, ignoreList, sortOrder]);
+
+            // 4. Generate Output JSON
             const outputJson = useMemo(() => {
-                // Determine prefix based on Module Name
                 const prefix = moduleName.trim() || 'user';
+                const directory = [];
 
-                // Generate Directory
-                // Only include keys that are NOT in the ignoreList AND NOT excluded via UI toggle
-                const directory = currentKeys
-                    .filter(k => !ignoreList.includes(k.name) && !excludedKeys[k.name]) 
-                    .map(k => {
-                        const userDefinedTo = mappings[k.name] || "";
-                        // Use dynamic prefix
-                        const defaultTo = `${prefix}.${k.name}`;
-                        
-                        const entry = {
-                            name: k.name,
-                            to: userDefinedTo || defaultTo
-                        };
+                // Use filteredKeys logic but strictly for output generation we usually want all NON-IGNORED/NON-EXCLUDED keys.
+                // However, the sort order in UI usually implies the output order for readability too.
+                // So we will map over filteredKeys (which respects sort) but we need to ensure we don't miss keys if search is active?
+                // Actually, typically config generation should include all valid keys regardless of UI search filter.
+                // BUT, user asked for "Sort Option". Usually applies to UI list. Does it apply to output JSON?
+                // Let's assume Sort applies to Output JSON too for consistency.
+                
+                // We need a list of ALL valid keys sorted by current sortOrder, ignoring searchTerm.
+                let processKeys = currentKeys.filter(k => !ignoreList.includes(k.name) && !excludedKeys[k.name]);
+                
+                if (sortOrder === 'az') {
+                    processKeys.sort((a, b) => a.name.localeCompare(b.name));
+                }
 
-                        if (conversions[k.name] && conversions[k.name].length > 0) {
-                            const convertMap = {};
-                            conversions[k.name].forEach(c => {
-                                if (c.from && c.to) {
-                                    convertMap[c.from] = c.to;
+                processKeys.forEach(k => {
+                    // A. Primary Mapping
+                    const userDefinedTo = mappings[k.name] || "";
+                    const defaultTo = `${prefix}.${k.name}`;
+                    
+                    let primaryConvertData = undefined;
+                    if (conversions[k.name] && conversions[k.name].length > 0) {
+                        primaryConvertData = {};
+                        conversions[k.name].forEach(c => {
+                            if (c.from && c.to) primaryConvertData[c.from] = c.to;
+                        });
+                    }
+
+                    const primaryEntry = {
+                        name: k.name,
+                        to: userDefinedTo || defaultTo
+                    };
+                    if (primaryConvertData && Object.keys(primaryConvertData).length > 0) {
+                        primaryEntry.convert = primaryConvertData;
+                    }
+                    directory.push(primaryEntry);
+
+                    // B. Extra Mappings
+                    if (extraMappings[k.name] && Array.isArray(extraMappings[k.name])) {
+                        extraMappings[k.name].forEach(extraObj => {
+                            if (!extraObj) return;
+
+                            const extraTo = extraObj.path;
+                            const extraEntry = {
+                                name: k.name,
+                                to: extraTo || `${prefix}.${k.name}_copy`
+                            };
+
+                            if (extraObj.conversions && Array.isArray(extraObj.conversions) && extraObj.conversions.length > 0) {
+                                const extraConvertData = {};
+                                extraObj.conversions.forEach(c => {
+                                    if (c.from && c.to) extraConvertData[c.from] = c.to;
+                                });
+                                if (Object.keys(extraConvertData).length > 0) {
+                                    extraEntry.convert = extraConvertData;
                                 }
-                            });
-                            if (Object.keys(convertMap).length > 0) {
-                                entry.convert = convertMap;
                             }
-                        }
-                        return entry;
-                    });
+
+                            directory.push(extraEntry);
+                        });
+                    }
+                });
 
                 const result = {
                     module: moduleName,
@@ -183,7 +342,7 @@
                 };
 
                 return JSON.stringify(result, null, 2);
-            }, [moduleName, ignoreList, currentKeys, mappings, excludedKeys, conversions]);
+            }, [moduleName, ignoreList, currentKeys, mappings, excludedKeys, conversions, extraMappings, sortOrder]);
 
             // Handlers
             const handleMappingChange = (keyName, newValue) => {
@@ -194,10 +353,37 @@
                 setExcludedKeys(prev => ({ ...prev, [keyName]: !prev[keyName] }));
             };
 
-            const togglePanel = (keyName) => {
-                setExpandedPanels(prev => ({ ...prev, [keyName]: !prev[keyName] }));
+            const togglePanel = (panelId) => {
+                setExpandedPanels(prev => ({ ...prev, [panelId]: !prev[panelId] }));
             };
 
+            // Extra Mapping Handlers
+            const addExtraMapping = (keyName) => {
+                setExtraMappings(prev => ({
+                    ...prev,
+                    [keyName]: [...(prev[keyName] || []), { path: "", conversions: [] }]
+                }));
+            };
+
+            const updateExtraMapping = (keyName, index, value) => {
+                setExtraMappings(prev => {
+                    const newList = [...(prev[keyName] || [])];
+                    if (newList[index]) {
+                        newList[index] = { ...newList[index], path: value };
+                    }
+                    return { ...prev, [keyName]: newList };
+                });
+            };
+
+            const removeExtraMapping = (keyName, index) => {
+                setExtraMappings(prev => {
+                    const newList = [...(prev[keyName] || [])];
+                    newList.splice(index, 1);
+                    return { ...prev, [keyName]: newList };
+                });
+            };
+
+            // Primary Conversion Handlers
             const addConversion = (keyName, fromVal, toVal) => {
                 if (!fromVal || !toVal) return;
                 setConversions(prev => ({
@@ -210,6 +396,32 @@
                 setConversions(prev => {
                     const newList = [...(prev[keyName] || [])];
                     newList.splice(index, 1);
+                    return { ...prev, [keyName]: newList };
+                });
+            };
+
+            // Extra Conversion Handlers
+            const addExtraConversion = (keyName, extraIdx, fromVal, toVal) => {
+                if (!fromVal || !toVal) return;
+                setExtraMappings(prev => {
+                    const newList = [...(prev[keyName] || [])];
+                    const item = { ...newList[extraIdx] }; 
+                    item.conversions = [...(item.conversions || []), { from: fromVal, to: toVal }];
+                    newList[extraIdx] = item;
+                    return { ...prev, [keyName]: newList };
+                });
+            };
+
+            const removeExtraConversion = (keyName, extraIdx, convIdx) => {
+                setExtraMappings(prev => {
+                    const newList = [...(prev[keyName] || [])];
+                    const item = { ...newList[extraIdx] };
+                    if (item.conversions) {
+                        const newConvs = [...item.conversions];
+                        newConvs.splice(convIdx, 1);
+                        item.conversions = newConvs;
+                    }
+                    newList[extraIdx] = item;
                     return { ...prev, [keyName]: newList };
                 });
             };
@@ -232,24 +444,24 @@
                             </div>
                             <h1 className="text-lg font-bold text-white">JSON Mapping Config Builder</h1>
                         </div>
-                        <div className="text-xs text-slate-500">v1.2 Standalone</div>
+                        <div className="text-xs text-slate-500">v1.6 Strict Input & Sort</div>
                     </header>
 
-                    {/* Top Section (Split View) */}
+                    {/* Top Section */}
                     <div className="flex flex-1 gap-4 min-h-0">
                         
-                        {/* LEFT: Input Data (Narrower, less important) */}
+                        {/* LEFT: Input Data */}
                         <div className="w-1/4 flex flex-col gap-2 min-w-[250px]">
                             <label className="flex items-center gap-2 text-xs font-semibold text-blue-400">
                                 <span className="w-2 h-2 rounded-full bg-blue-400"></span>
-                                Input (_temp JSON)
+                                Input (Contains "_temp")
                             </label>
                             <div className={`flex-1 relative rounded-xl border transition-colors overflow-hidden ${error ? 'border-red-500/50 bg-red-900/10' : 'border-slate-700 bg-slate-800'}`}>
                                 <textarea
                                     className="w-full h-full bg-transparent p-3 font-mono text-xs resize-none focus:outline-none focus:ring-1 focus:ring-blue-500/50 text-slate-400"
                                     value={inputStr}
                                     onChange={(e) => setInputStr(e.target.value)}
-                                    placeholder='{"_temp": {"key": "val"}}'
+                                    placeholder='{"_temp": {"key": "val"}} or nested...'
                                     spellCheck="false"
                                 />
                                 {error && (
@@ -261,27 +473,46 @@
                             </div>
                         </div>
 
-                        {/* CENTER/RIGHT: Mapping Workspace (Main Focus) */}
+                        {/* CENTER/RIGHT: Mapping Workspace */}
                         <div className="flex-1 flex flex-col gap-3 bg-slate-800/50 p-4 rounded-xl border border-slate-700 shadow-xl min-w-0">
                             <div className="flex items-center justify-between shrink-0">
                                 <div className="flex items-center gap-2 text-sm font-semibold text-purple-400">
                                     <SimpleIcon name="Settings" size={16} />
-                                    Mapping Config (Workspace)
+                                    Mapping Config
                                 </div>
                                 
-                                {/* Module Name Input */}
-                                <input 
-                                    type="text" 
-                                    value={moduleName}
-                                    onChange={(e) => setModuleName(e.target.value)}
-                                    className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs focus:border-purple-500 w-48 text-center"
-                                    placeholder="Module Name"
-                                />
+                                <div className="flex items-center gap-2">
+                                    {/* Sort Toggles */}
+                                    <div className="flex bg-slate-900 rounded p-0.5 border border-slate-600">
+                                        <button 
+                                            onClick={() => setSortOrder('original')}
+                                            className={`p-1.5 rounded ${sortOrder === 'original' ? 'bg-slate-700 text-white shadow' : 'text-slate-500 hover:text-slate-300'}`}
+                                            title="Original Order"
+                                        >
+                                            <SimpleIcon name="List" size={14} />
+                                        </button>
+                                        <button 
+                                            onClick={() => setSortOrder('az')}
+                                            className={`p-1.5 rounded ${sortOrder === 'az' ? 'bg-slate-700 text-white shadow' : 'text-slate-500 hover:text-slate-300'}`}
+                                            title="Sort A-Z"
+                                        >
+                                            <SimpleIcon name="SortAsc" size={14} />
+                                        </button>
+                                    </div>
+
+                                    <input 
+                                        type="text" 
+                                        value={moduleName}
+                                        onChange={(e) => setModuleName(e.target.value)}
+                                        className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs focus:border-purple-500 w-48 text-center"
+                                        placeholder="Module Name"
+                                    />
+                                </div>
                             </div>
 
                             {/* Ignore Field Input */}
                             <div className="bg-slate-800 rounded p-3 border border-slate-700 shrink-0">
-                                <label className="text-xs text-slate-400 block mb-1">Ignore Fields (Comma separated) - <span className="text-slate-500">Fields added here will be hidden from list below</span></label>
+                                <label className="text-xs text-slate-400 block mb-1">Ignore Fields (Comma separated)</label>
                                 <input 
                                     type="text" 
                                     value={ignoreStr}
@@ -307,30 +538,36 @@
 
                             {/* Main List */}
                             <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar flex flex-col gap-2">
-                                {filteredKeys.length === 0 ? (
+                                {currentKeys.length === 0 ? (
                                     <div className="text-center py-10 text-slate-500 text-sm italic">
-                                        {currentKeys.length === 0 ? "Waiting for Input..." : "All fields hidden or filtered"}
+                                        {inputStr && !error ? "Found input but no fields in _temp." : "Waiting for valid _temp object..."}
+                                    </div>
+                                ) : filteredKeys.length === 0 ? (
+                                    <div className="text-center py-10 text-slate-500 text-sm italic">
+                                        All fields hidden by filter or ignore list.
                                     </div>
                                 ) : (
                                     filteredKeys.map((k, idx) => {
                                         const isExcluded = excludedKeys[k.name];
-                                        const isExpanded = expandedPanels[k.name];
-                                        const hasConversions = conversions[k.name] && conversions[k.name].length > 0;
-                                        
-                                        // Calculate current default prefix
+                                        const primaryExpanded = expandedPanels[k.name];
+                                        const hasPrimaryConversions = conversions[k.name] && conversions[k.name].length > 0;
                                         const currentPrefix = moduleName.trim() || 'user';
+                                        
+                                        const extras = extraMappings[k.name] || [];
 
                                         return (
                                             <div key={`${k.fullPath}-${idx}`} className={`flex flex-col rounded-lg border transition-all ${isExcluded ? 'bg-slate-800/30 border-slate-800 opacity-60' : 'bg-slate-800 border-slate-700 hover:border-purple-500/50'}`}>
-                                                <div className="flex items-center gap-3 p-2">
+                                                
+                                                {/* Primary Row */}
+                                                <div className="flex items-center gap-3 p-2 relative">
                                                     
-                                                    {/* Field Name & Sample */}
+                                                    {/* Field Info */}
                                                     <div className="flex-[2] min-w-0 flex flex-col justify-center">
                                                         <div className="flex items-center gap-2">
                                                             <button 
                                                                 onClick={() => toggleExclude(k.name)}
                                                                 className={`transition-colors ${isExcluded ? 'text-slate-600' : 'text-purple-400 hover:text-purple-300'}`}
-                                                                title={isExcluded ? "Include in Directory" : "Exclude from Directory"}
+                                                                title={isExcluded ? "Include" : "Exclude"}
                                                             >
                                                                 {isExcluded ? <SimpleIcon name="EyeOff" size={14} /> : <SimpleIcon name="Eye" size={14} />}
                                                             </button>
@@ -343,12 +580,11 @@
 
                                                     <SimpleIcon name="ArrowRight" size={12} className="text-slate-600 shrink-0" />
 
-                                                    {/* Target Path Input */}
+                                                    {/* Primary Input */}
                                                     <div className="flex-[3]">
                                                         <input 
                                                             type="text"
                                                             disabled={isExcluded}
-                                                            // Updated logic: Default is now {moduleName}.{fieldName}
                                                             value={mappings[k.name] !== undefined ? mappings[k.name] : `${currentPrefix}.${k.name}`}
                                                             onChange={(e) => handleMappingChange(k.name, e.target.value)}
                                                             className={`w-full bg-slate-900 border rounded px-2 py-1.5 text-sm focus:outline-none transition-colors ${isExcluded ? 'border-transparent text-slate-600 cursor-not-allowed' : 'border-slate-600 text-emerald-400 focus:border-emerald-500'}`}
@@ -356,62 +592,95 @@
                                                         />
                                                     </div>
 
-                                                    {/* Convert Button */}
-                                                    <button
-                                                        onClick={() => !isExcluded && togglePanel(k.name)}
-                                                        disabled={isExcluded}
-                                                        className={`px-2 py-1.5 rounded transition-all flex items-center gap-1 text-xs border ${hasConversions ? 'bg-amber-900/30 text-amber-400 border-amber-500/50' : 'bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600'} ${isExcluded ? 'opacity-30 cursor-not-allowed' : ''}`}
-                                                    >
-                                                        <SimpleIcon name="Sliders" size={12} />
-                                                        <span className="hidden sm:inline">Convert</span>
-                                                    </button>
+                                                    {/* Action Buttons */}
+                                                    <div className="flex items-center gap-1">
+                                                        <button
+                                                            onClick={() => !isExcluded && addExtraMapping(k.name)}
+                                                            disabled={isExcluded}
+                                                            className={`p-1.5 rounded transition-all text-xs border ${isExcluded ? 'opacity-30 cursor-not-allowed border-slate-700 text-slate-500' : 'bg-slate-700 border-slate-600 text-blue-300 hover:bg-blue-600 hover:text-white hover:border-blue-500'}`}
+                                                            title="Add Extra Field"
+                                                        >
+                                                            <SimpleIcon name="Plus" size={12} />
+                                                        </button>
+
+                                                        <button
+                                                            onClick={() => !isExcluded && togglePanel(k.name)}
+                                                            disabled={isExcluded}
+                                                            className={`p-1.5 rounded transition-all flex items-center gap-1 text-xs border ${hasPrimaryConversions ? 'bg-amber-900/30 text-amber-400 border-amber-500/50' : 'bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600'} ${isExcluded ? 'opacity-30 cursor-not-allowed' : ''}`}
+                                                            title="Convert"
+                                                        >
+                                                            <SimpleIcon name="Sliders" size={12} />
+                                                        </button>
+                                                    </div>
                                                 </div>
 
-                                                {/* Conversion Panel */}
-                                                {isExpanded && !isExcluded && (
-                                                    <div className="border-t border-slate-700/50 bg-slate-900/40 p-2 animate-in fade-in slide-in-from-top-1 duration-200">
-                                                        <div className="space-y-2">
-                                                            {conversions[k.name]?.map((c, cIdx) => (
-                                                                <div key={cIdx} className="flex items-center gap-2 text-xs">
-                                                                    <div className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-300 text-center">{c.from}</div>
-                                                                    <SimpleIcon name="ArrowRight" size={10} className="text-slate-600" />
-                                                                    <div className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-emerald-300 text-center">{c.to}</div>
-                                                                    <button onClick={() => removeConversion(k.name, cIdx)} className="text-slate-500 hover:text-red-400"><SimpleIcon name="X" size={12} /></button>
-                                                                </div>
-                                                            ))}
-                                                            
-                                                            <div className="flex items-center gap-2 bg-slate-900/50 p-1 rounded border border-slate-700/50">
-                                                                <input id={`from-${k.name}`} type="text" placeholder="From" className="flex-1 min-w-0 bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs focus:border-amber-500" />
-                                                                <SimpleIcon name="ArrowRight" size={10} className="text-slate-500" />
-                                                                <input id={`to-${k.name}`} type="text" placeholder="To" className="flex-1 min-w-0 bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs focus:border-amber-500" 
-                                                                    onKeyDown={(e) => {
-                                                                        if (e.key === 'Enter') {
-                                                                            const f = document.getElementById(`from-${k.name}`);
-                                                                            const t = document.getElementById(`to-${k.name}`);
-                                                                            if (f.value && t.value) {
-                                                                                addConversion(k.name, f.value, t.value);
-                                                                                f.value = ''; t.value = ''; f.focus();
-                                                                            }
-                                                                        }
-                                                                    }}
-                                                                />
-                                                                <button 
-                                                                    onClick={() => {
-                                                                        const f = document.getElementById(`from-${k.name}`);
-                                                                        const t = document.getElementById(`to-${k.name}`);
-                                                                        if (f.value && t.value) {
-                                                                            addConversion(k.name, f.value, t.value);
-                                                                            f.value = ''; t.value = '';
-                                                                        }
-                                                                    }}
-                                                                    className="p-1 bg-slate-700 hover:bg-amber-600 hover:text-white text-slate-300 rounded"
-                                                                >
-                                                                    <SimpleIcon name="Plus" size={12} />
-                                                                </button>
-                                                            </div>
-                                                        </div>
+                                                {/* Primary Conversion Panel */}
+                                                {primaryExpanded && !isExcluded && (
+                                                    <div className="border-t border-slate-700/50 bg-slate-900/40 p-2 animate-fade-in">
+                                                        <ConversionEditor 
+                                                            conversions={conversions[k.name]} 
+                                                            onAdd={(f, t) => addConversion(k.name, f, t)}
+                                                            onRemove={(i) => removeConversion(k.name, i)}
+                                                            placeholderPrefix={`p-${k.name}`}
+                                                        />
                                                     </div>
                                                 )}
+
+                                                {/* Extra Mappings Rows */}
+                                                {extras.map((extraObj, eIdx) => {
+                                                    const extraPanelKey = `${k.name}-extra-${eIdx}`;
+                                                    const isExtraExpanded = expandedPanels[extraPanelKey];
+                                                    const hasExtraConversions = extraObj.conversions && extraObj.conversions.length > 0;
+
+                                                    return (
+                                                        <div key={`extra-${eIdx}`}>
+                                                            <div className="flex items-center gap-3 p-2 pt-0 relative animate-fade-in">
+                                                                <div className="flex-[2] flex justify-end pr-4">
+                                                                    <SimpleIcon name="CornerDownRight" size={14} className="text-slate-600" />
+                                                                </div>
+                                                                <SimpleIcon name="ArrowRight" size={12} className="text-slate-600 shrink-0 opacity-50" />
+                                                                <div className="flex-[3]">
+                                                                    <input 
+                                                                        type="text"
+                                                                        disabled={isExcluded}
+                                                                        value={extraObj.path}
+                                                                        onChange={(e) => updateExtraMapping(k.name, eIdx, e.target.value)}
+                                                                        className={`w-full bg-slate-900/50 border border-slate-700 rounded px-2 py-1.5 text-sm focus:outline-none transition-colors text-emerald-300 focus:border-emerald-500 placeholder-slate-600`}
+                                                                        placeholder={`${currentPrefix}.${k.name}_copy`}
+                                                                    />
+                                                                </div>
+                                                                <div className="flex items-center gap-1 w-[60px]">
+                                                                    <button
+                                                                        onClick={() => togglePanel(extraPanelKey)}
+                                                                        className={`p-1.5 rounded transition-all text-xs border ${hasExtraConversions ? 'bg-amber-900/30 text-amber-400 border-amber-500/50' : 'text-slate-500 hover:text-slate-300 border-transparent hover:border-slate-600'}`}
+                                                                        title="Convert for this extra field"
+                                                                    >
+                                                                        <SimpleIcon name="Sliders" size={12} />
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => removeExtraMapping(k.name, eIdx)}
+                                                                        className="p-1.5 text-slate-500 hover:text-red-400 transition-colors"
+                                                                        title="Remove"
+                                                                    >
+                                                                        <SimpleIcon name="Trash" size={12} />
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                            
+                                                            {/* Extra Conversion Panel (Fixed UI consistency) */}
+                                                            {isExtraExpanded && (
+                                                                <div className="border-t border-slate-700/50 bg-slate-900/40 p-2 animate-fade-in">
+                                                                    <ConversionEditor 
+                                                                        conversions={extraObj.conversions} 
+                                                                        onAdd={(f, t) => addExtraConversion(k.name, eIdx, f, t)}
+                                                                        onRemove={(i) => removeExtraConversion(k.name, eIdx, i)}
+                                                                        placeholderPrefix={`e-${k.name}-${eIdx}`}
+                                                                    />
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
                                             </div>
                                         );
                                     })
@@ -420,7 +689,7 @@
                         </div>
                     </div>
 
-                    {/* Bottom Section: Output (Full Width) */}
+                    {/* Bottom Section: Output */}
                     <div className="h-1/4 min-h-[150px] flex flex-col gap-2 shrink-0">
                         <div className="flex items-center justify-between">
                             <label className="flex items-center gap-2 text-sm font-semibold text-emerald-400">
