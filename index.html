@@ -39,9 +39,10 @@
         const ECS_NON_KEYWORD_FIELDS = {
             // --- DATE FIELDS ---
             "@timestamp": "date", "event.created": "date", "event.ingested": "date", "event.start": "date", "event.end": "date",
-            "file.created": "date", "file.accessed": "date", "file.mtime": "date", "file.ctime": "date", "process.start": "date", "process.end": "date",
+            "file.created": "date", "file.accessed": "date", "file.mtime": "date", "file.ctime": "date", 
+            "process.start": "date", "process.end": "date", "package.installed": "date",
             "tls.client.not_after": "date", "tls.client.not_before": "date", "tls.server.not_after": "date", "tls.server.not_before": "date",
-            "x509.not_after": "date", "x509.not_before": "date",
+            "x509.not_after": "date", "x509.not_before": "date", "code_signature.timestamp": "date",
             
             // --- IP FIELDS ---
             "source.ip": "ip", "source.nat.ip": "ip", "destination.ip": "ip", "destination.nat.ip": "ip",
@@ -49,26 +50,44 @@
             "host.ip": "ip", "network.forwarded_ip": "ip", "related.ip": "ip", "dns.resolved_ip": "ip",
             "observer.ip": "ip", "threat.indicator.ip": "ip", "vulnerability.scanner.ip": "ip",
 
-            // --- LONG / INTEGER FIELDS ---
+            // --- LONG / INTEGER FIELDS (BYTES, PORTS, COUNTS) ---
+            // Network & Transmission
             "source.port": "long", "destination.port": "long", "client.port": "long", "server.port": "long", "url.port": "long",
             "source.bytes": "long", "destination.bytes": "long", "client.bytes": "long", "server.bytes": "long", "network.bytes": "long",
+            "http.request.bytes": "long", "http.response.bytes": "long", "http.request.body.bytes": "long", "http.response.body.bytes": "long",
+            
+            // Packets & Counts
             "source.packets": "long", "destination.packets": "long", "network.packets": "long",
-            "http.response.status_code": "long", "process.pid": "long", "process.ppid": "long", "process.parent.pid": "long",
-            "event.duration": "long", "event.sequence": "long", "event.severity": "long", "file.size": "long",
+            "process.args_count": "long", "http.response.status_code": "long",
+            
+            // Process & System
+            "process.pid": "long", "process.ppid": "long", "process.parent.pid": "long", "process.exit_code": "long", "process.thread.id": "long",
+            "event.duration": "long", "event.sequence": "long", "event.severity": "long",
+            "host.uptime": "long",
+            
+            // File & Storage
+            "file.size": "long", "file.line": "long", "package.size": "long", "volume.size": "long", "volume.used.bytes": "long",
+            "registry.data.bytes": "long",
 
             // --- FLOAT FIELDS ---
-            "event.risk_score": "float", "event.risk_score_norm": "float", "host.cpu.usage": "float", "host.memory.usage": "float",
+            "event.risk_score": "float", "event.risk_score_norm": "float", 
+            "host.cpu.usage": "float", "host.memory.usage": "float", "host.disk.read.bytes": "float", "host.disk.write.bytes": "float",
+            "host.network.ingress.bytes": "float", "host.network.egress.bytes": "float",
+            "vulnerability.score.base": "float", "vulnerability.score.environmental": "float", "vulnerability.score.temporal": "float",
 
             // --- BOOLEAN FIELDS ---
             "tls.established": "boolean", "process.interactive": "boolean", "file.code_signature.valid": "boolean",
+            "host.os.kernel": "boolean", "event.kind_alert": "boolean", // Heuristic
 
-            // --- TEXT FIELDS ---
+            // --- TEXT FIELDS (Explicitly Long Text/Message) ---
             "message": "text", "error.message": "text", "error.stack_trace": "text", "event.original": "text",
             "http.request.body.content": "text", "http.response.body.content": "text", "process.command_line": "text",
+            "user_agent.original": "text", "powershell.command.value": "text",
             
             // --- GEO POINT FIELDS ---
             "geo.location": "geo_point", "source.geo.location": "geo_point", "destination.geo.location": "geo_point",
-            "client.geo.location": "geo_point", "server.geo.location": "geo_point", "host.geo.location": "geo_point"
+            "client.geo.location": "geo_point", "server.geo.location": "geo_point", "host.geo.location": "geo_point",
+            "threat.indicator.geo.location": "geo_point"
         };
 
         // --- Validation Helper ---
