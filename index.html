@@ -266,7 +266,7 @@
         };
 
         const CoverageChecker = ({ mergedKeys, mappings, extraMappings, moduleName, ignoreList, excludedKeys }) => {
-            const [requirementsStr, setRequirementsStr] = useStickyState("base.timestamp\nevent.category\nevent.type\nevent.action", 'jcb_coverage_reqs');
+            const [requirementsStr, setRequirementsStr] = useStickyState("#timestamp\nevent.category\nevent.type\nevent.action", 'jcb_coverage_reqs');
             const [filterStatus, setFilterStatus] = useState('all'); 
 
             const currentOutputMap = useMemo(() => {
@@ -473,6 +473,21 @@
                 return flatFields;
             };
 
+            // Helper to handle CORS issues by falling back to a proxy
+            const fetchRawFile = async (url) => {
+                try {
+                    const res = await fetch(url);
+                    if (res.ok) return await res.text();
+                    throw new Error(res.status);
+                } catch (err) {
+                    console.warn("Direct fetch failed, attempting proxy...", err);
+                    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+                    const res = await fetch(proxyUrl);
+                    if (!res.ok) throw new Error(`Proxy Error: ${res.status}`);
+                    return await res.text();
+                }
+            };
+
             const fetchSchemaContent = async (file) => {
                 setSelectedFile(file);
                 setParsedFields([]);
@@ -480,9 +495,7 @@
                 setFilterLevel('all'); 
                 setExpandedField(null); 
                 try {
-                    const res = await fetch(file.download_url);
-                    if (!res.ok) throw new Error("Failed to fetch file content");
-                    const text = await res.text();
+                    const text = await fetchRawFile(file.download_url);
                     const parsed = jsyaml.load(text);
                     const fields = processYamlToFields(parsed);
                     setParsedFields(fields);
@@ -513,9 +526,7 @@
                         const batch = files.slice(i, i + batchSize);
                         const promises = batch.map(async (file) => {
                             try {
-                                const res = await fetch(file.download_url);
-                                if (!res.ok) throw new Error(`Status ${res.status}`);
-                                const text = await res.text();
+                                const text = await fetchRawFile(file.download_url);
                                 const parsed = jsyaml.load(text);
                                 const fields = processYamlToFields(parsed);
                                 return fields.filter(f => f.level === 'core');
@@ -1101,7 +1112,7 @@
                                 </button>
                             </div>
                             <div className="h-4 w-px bg-slate-700"></div>
-                            <div className="text-xs text-slate-500">v4.3 Coverage Check</div>
+                            <div className="text-xs text-slate-500">v4.4 CORS Fix</div>
                             <button onClick={handleResetApp} className="flex items-center gap-1 text-xs bg-red-900/50 hover:bg-red-800 text-red-200 px-2 py-1 rounded border border-red-700/50 transition-colors"><SimpleIcon name="RefreshCw" size={12} /> Reset</button>
                         </div>
                     </header>
