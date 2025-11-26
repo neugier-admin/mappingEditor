@@ -1,1143 +1,942 @@
-<!DOCTYPE html>
-<html lang="zh-HK">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>JSON Mapping Config Builder</title>
-    
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- React & ReactDOM -->
-    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-    
-    <!-- Babel for JSX -->
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    
-    <!-- JS-YAML for parsing ECS schemas -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/js-yaml/4.1.0/js-yaml.min.js"></script>
+import React, { useState, useMemo, useEffect } from 'react';
+import type { ChangeEvent } from 'react';
 
-    <style>
-        body { background-color: #0f172a; color: #e2e8f0; }
-        .custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: rgba(30, 41, 59, 0.5); }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(71, 85, 105, 0.8); border-radius: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, 0.8); }
-        textarea:focus, input:focus { outline: none; }
-        .animate-fade-in { animation: fadeIn 0.2s ease-out; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+import { initializeApp } from 'firebase/app';
+import { 
+  getAuth, 
+  onAuthStateChanged, 
+  GoogleAuthProvider, 
+  signOut, 
+  signInAnonymously, 
+  signInWithPopup, 
+  signInWithRedirect, 
+  getRedirectResult,
+  setPersistence,
+  browserLocalPersistence
+} from 'firebase/auth';
+import type { User as FirebaseUser } from 'firebase/auth';
+import { getFirestore, doc, setDoc, onSnapshot, collection, getDocs, deleteDoc } from 'firebase/firestore';
+
+// --- Global Declarations ---
+declare global {
+  var __firebase_config: string | undefined;
+  var __app_id: string | undefined;
+  var __initial_auth_token: string | undefined;
+}
+
+// --- Firebase Config Setup ---
+const getFirebaseConfig = () => {
+  try {
+    if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+      return JSON.parse(__firebase_config);
+    }
+  } catch (e) {}
+
+  return {
+    apiKey: "AIzaSyCAXIn0MoSh_DMH2ixX3DkRBwadRtvfjtc",
+    authDomain: "expense-splitter-4b1ed.firebaseapp.com",
+    projectId: "expense-splitter-4b1ed",
+    storageBucket: "expense-splitter-4b1ed.firebasestorage.app",
+    messagingSenderId: "161709592392",
+    appId: "1:161709592392:web:46b9add3ede9d166d66d7d",
+    measurementId: "G-XR4QLM1WPZ"
+  };
+};
+
+// --- Settings ---
+const APP_ID_FIXED = 'expense-splitter'; 
+const DEFAULT_PAIRING_ID = 'unBXa8QdpPO4oG7ST36mbBBt3Wg2';
+const ALLOWED_EMAILS: string[] = []; 
+
+// Initialize Firebase
+const firebaseConfig = getFirebaseConfig();
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+// --- Interfaces ---
+interface Transaction {
+  id: string;
+  date: string;
+  description: string;
+  cardholder: string;
+  isHerCard: boolean;
+  amount: number;
+  type: 'me' | 'her' | 'split' | 'gift';
+  source: 'amex' | 'other';
+}
+
+interface RoomData {
+  months: string[]; 
+  [key: string]: any; 
+}
+
+interface IconProps extends React.SVGProps<SVGSVGElement> { size?: number | string; className?: string; }
+
+// --- Icons ---
+const IconWrapper: React.FC<IconProps & { children: React.ReactNode }> = ({ children, size = 24, className = "", ...props }) => (<svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>{children}</svg>);
+const Upload = (p: IconProps) => <IconWrapper {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></IconWrapper>;
+const Calculator = (p: IconProps) => <IconWrapper {...p}><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="16" y1="14" x2="16" y2="18"/><path d="M16 10h.01"/><path d="M12 10h.01"/><path d="M8 10h.01"/><path d="M12 14h.01"/><path d="M8 14h.01"/><path d="M12 18h.01"/><path d="M8 18h.01"/></IconWrapper>;
+const Trash2 = (p: IconProps) => <IconWrapper {...p}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></IconWrapper>;
+const Printer = (p: IconProps) => <IconWrapper {...p}><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></IconWrapper>;
+const FileSpreadsheet = (p: IconProps) => <IconWrapper {...p}><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h2"/><path d="M8 17h2"/><path d="M14 13h2"/><path d="M14 17h2"/></IconWrapper>;
+const Save = (p: IconProps) => <IconWrapper {...p}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></IconWrapper>;
+const Plus = (p: IconProps) => <IconWrapper {...p}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></IconWrapper>;
+const Calendar = (p: IconProps) => <IconWrapper {...p}><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></IconWrapper>;
+const Clipboard = (p: IconProps) => <IconWrapper {...p}><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></IconWrapper>;
+const Plane = (p: IconProps) => <IconWrapper {...p}><path d="M2 12h20"/><path d="M13 2l3.5 10h-7L13 2z"/><path d="M13 22l-3.5-10h7L13 22z"/><path d="M2 12l5-8"/><path d="M22 12l-5 8"/></IconWrapper>;
+const ShoppingBag = (p: IconProps) => <IconWrapper {...p}><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></IconWrapper>;
+const AlertTriangle = (p: IconProps) => <IconWrapper {...p}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></IconWrapper>;
+const ArrowUp = (p: IconProps) => <IconWrapper {...p}><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></IconWrapper>;
+const ArrowDown = (p: IconProps) => <IconWrapper {...p}><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></IconWrapper>;
+const CheckCircle = (p: IconProps) => <IconWrapper {...p}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></IconWrapper>;
+const CloudCheck = (p: IconProps) => <IconWrapper {...p}><path d="M12 21a9 9 0 0 1 0-18c1.05 0 2.05.18 3 .5"/><path d="M9 10a1 1 0 0 1 1-1"/><path d="M14.31 8a2 2 0 0 0-2-2 3 3 0 0 0-3 3"/><path d="M20 12h-2"/><path d="M22 16h-4"/><path d="M16 21l2 2 4-4"/></IconWrapper>; 
+const Loader2 = (p: IconProps) => <IconWrapper {...p}><path d="M21 12a9 9 0 1 1-6.219-8.56"/><animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="1s" repeatCount="indefinite" /></IconWrapper>;
+const LinkIcon = (p: IconProps) => <IconWrapper {...p}><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></IconWrapper>;
+const LogOut = (p: IconProps) => <IconWrapper {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></IconWrapper>;
+const UserIcon = (p: IconProps) => <IconWrapper {...p}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></IconWrapper>;
+const Menu = (p: IconProps) => <IconWrapper {...p}><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="18" x2="20" y2="18"/></IconWrapper>;
+const X = (p: IconProps) => <IconWrapper {...p}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></IconWrapper>;
+const RefreshCw = (p: IconProps) => <IconWrapper {...p}><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></IconWrapper>;
+
+// --- Constants ---
+const SPLIT_KEYWORDS = ['HKEXPRESS', 'TRIP.COM', 'AGODA', 'AIRBNB', 'HOTEL', 'AIRLINE', 'TOYOKO', 'MARINWORLD', 'BOOKING.COM', 'KLOOK', 'PEACH', 'ANA', 'JAL', 'RYANAIR', 'EASYJET'];
+const HER_KEYWORDS = ['MACAUPASS'];
+const IGNORE_KEYWORDS = ['PAYMENT', '繳費', 'AUTOPAY', 'FPS', 'FUND TRANSFER', 'THANK YOU', 'REBATE'];
+const STORAGE_KEY_PREFIX = 'expense_splitter_';
+const STORAGE_KEY_MONTHS = 'expense_splitter_months';
+const STORAGE_KEY_PAIRING = 'expense_splitter_pairing_id';
+
+const TYPE_OPTIONS = [
+    { id: 'me', label: 'M', className: 'bg-slate-100 text-slate-600 border-slate-200' },
+    { id: 'split', label: 'AA', className: 'bg-cyan-100 text-cyan-700 border-cyan-200' },
+    { id: 'her', label: 'H', className: 'bg-pink-100 text-pink-600 border-pink-200' },
+    { id: 'gift', label: 'G', className: 'bg-purple-100 text-purple-600 border-purple-200' }
+] as const;
+
+// --- Helpers ---
+const generateId = () => Math.random().toString(36).substr(2, 9);
+
+const splitCsvLine = (line: string): string[] => {
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') { current += '"'; i++; } 
+      else { inQuotes = !inQuotes; }
+    } else if (char === ',' && !inQuotes) {
+      result.push(current.trim()); current = '';
+    } else { current += char; }
+  }
+  result.push(current.trim());
+  return result;
+};
+
+const formatDateStandard = (dateStr: string): string => {
+  if (!dateStr) return '';
+  const parts = dateStr.split('/');
+  if (parts.length === 3) {
+     const [p1, p2, p3] = parts;
+     if (p3.length === 4) return `${p3}/${p1.padStart(2, '0')}/${p2.padStart(2, '0')}`;
+     if (p1.length === 4) return `${p1}/${p2.padStart(2, '0')}/${p3.padStart(2, '0')}`;
+  }
+  return dateStr;
+};
+
+const parseAmexCSV = (csvText: string): Transaction[] => {
+  const lines = csvText.split('\n').filter(line => line.trim() !== '');
+  const headers = splitCsvLine(lines[0]);
+  const dateIdx = headers.findIndex(h => h.includes('日期'));
+  const descIdx = headers.findIndex(h => h.includes('描述'));
+  const holderIdx = headers.findIndex(h => h.includes('卡会员') || h.includes('卡會員'));
+  const amountIdx = headers.findIndex(h => h.includes('金額'));
+
+  if (amountIdx === -1) return [];
+
+  return lines.slice(1).map((line): Transaction | null => {
+    const cleanCols = splitCsvLine(line);
+    if (cleanCols.length < headers.length) return null;
+
+    const description = cleanCols[descIdx] || '';
+    if (IGNORE_KEYWORDS.some(k => description.toUpperCase().includes(k))) return null;
+
+    const cardholder = cleanCols[holderIdx] || '';
+    const amount = parseFloat(cleanCols[amountIdx]);
+    const rawDate = cleanCols[dateIdx] || '';
+    const date = formatDateStandard(rawDate);
+
+    if (isNaN(amount)) return null;
+
+    let type: Transaction['type'] = 'me';
+    const descUpper = description.toUpperCase();
+
+    // MACAUPASS Logic: Only 500 is Her, else Me
+    if (descUpper.includes('MACAUPASS')) {
+        type = amount === 500 ? 'her' : 'me';
+    }
+    else if (SPLIT_KEYWORDS.some(k => descUpper.includes(k))) {
+        type = 'split';
+    }
+    else if (cardholder.toUpperCase().includes('PUI IENG')) {
+        type = 'her';
+    }
+
+    return {
+      id: generateId(),
+      date,
+      description,
+      cardholder: cardholder.includes('CHAN') ? 'MAIN' : 'SUB',
+      isHerCard: cardholder.toUpperCase().includes('PUI IENG'),
+      amount,
+      type,
+      source: 'amex'
+    };
+  }).filter((t): t is Transaction => t !== null);
+};
+
+const parseTextBill = (text: string, year: string): Transaction[] => {
+  const lines = text.split('\n').filter(line => line.trim() !== '');
+  const monthMap: {[key: string]: string} = {
+    'JAN': '01', 'FEB': '02', 'MAR': '03', 'APR': '04', 'MAY': '05', 'JUN': '06',
+    'JUL': '07', 'AUG': '08', 'SEP': '09', 'OCT': '10', 'NOV': '11', 'DEC': '12'
+  };
+
+  return lines.map((line): Transaction | null => {
+    const trimmed = line.trim();
+    const parts = trimmed.split(/\s+/);
+    if (parts.length < 4) return null;
+
+    const isCredit = parts[parts.length - 1] === 'CR';
+    const amountIndex = isCredit ? parts.length - 2 : parts.length - 1;
+    const amountStr = parts[amountIndex].replace(/,/g, '');
+    const amount = parseFloat(amountStr);
+    if (isNaN(amount)) return null;
+
+    const datePart = parts[0]; 
+    const [day, monthStr] = datePart.split('-');
+    const month = monthMap[monthStr?.toUpperCase()];
+    if (!month) return null;
+    const formattedDate = formatDateStandard(`${year}/${month}/${day}`);
+    const description = parts.slice(2, amountIndex).join(' ');
+    
+    if (IGNORE_KEYWORDS.some(k => description.toUpperCase().includes(k))) return null;
+
+    let type: Transaction['type'] = 'me';
+    const descUpper = description.toUpperCase();
+
+    // MACAUPASS Logic for Text
+    if (descUpper.includes('MACAUPASS')) {
+        type = amount === 500 ? 'her' : 'me';
+    }
+    else if (SPLIT_KEYWORDS.some(k => descUpper.includes(k))) {
+        type = 'split';
+    }
+    
+    return {
+      id: generateId(),
+      date: formattedDate,
+      description,
+      cardholder: 'OTHER', 
+      isHerCard: false,
+      amount: isCredit ? -amount : amount, 
+      type,
+      source: 'other'
+    };
+  }).filter((t): t is Transaction => t !== null && t.amount > 0);
+};
+
+// --- Main Component ---
+const ExpenseSplitter: React.FC = () => {
+  const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [currentMonth, setCurrentMonth] = useState<string>('');
+  const [availableMonths, setAvailableMonths] = useState<string[]>([]);
+  const [filterCardholder, setFilterCardholder] = useState<'all' | 'me' | 'her'>('all');
+  const [showTextModal, setShowTextModal] = useState(false);
+  const [textInput, setTextInput] = useState('');
+  const [statusMsg, setStatusMsg] = useState('');
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [cloudEnabled, setCloudEnabled] = useState(false);
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
+  const [authError, setAuthError] = useState('');
+  const [isPermissionError, setIsPermissionError] = useState(false);
+  const [showRedirectLogin, setShowRedirectLogin] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  const [pairingId, setPairingId] = useState(localStorage.getItem(STORAGE_KEY_PAIRING) || DEFAULT_PAIRING_ID);
+  const [cloudData, setCloudData] = useState<RoomData | null>(null);
+  const [showDetailSummary, setShowDetailSummary] = useState(false); // Toggle for details
+
+  // UI Modals
+  const [showMonthModal, setShowMonthModal] = useState(false);
+  const [newMonthInput, setNewMonthInput] = useState('');
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showPairingModal, setShowPairingModal] = useState(false);
+  const [newPairingInput, setNewPairingInput] = useState('');
+  const [sortConfig, setSortConfig] = useState<{ key: keyof Transaction | ''; direction: 'asc' | 'desc' }>({ key: 'date', direction: 'desc' });
+
+  // --- Auth & Init ---
+  useEffect(() => {
+    setPersistence(auth, browserLocalPersistence).catch(console.error);
+    const isDemoKey = firebaseConfig.apiKey?.includes("YOUR_API_KEY") || firebaseConfig.apiKey === "DEMO";
+    if (isDemoKey) {
+      setCloudEnabled(false);
+      loadLocalMonths();
+      setIsAuthChecking(false);
+    } else {
+      getRedirectResult(auth).catch((error) => {
+          console.error("Redirect Error:", error);
+          setAuthError(error.message);
+      });
+      const unsubscribe = onAuthStateChanged(auth, (u) => {
+        if (u) {
+          if (ALLOWED_EMAILS.length === 0 || (u.email && ALLOWED_EMAILS.includes(u.email)) || u.isAnonymous) {
+             setUser(u);
+             setCloudEnabled(true);
+             setAuthError('');
+             if (pairingId) loadCloudRoom(pairingId);
+             else setIsAuthChecking(false);
+          } else {
+             signOut(auth);
+             setUser(null);
+             setCloudEnabled(false);
+             setAuthError(`權限不足: ${u.email}`);
+             setIsAuthChecking(false);
+          }
+        } else {
+          setUser(null);
+          setCloudEnabled(false);
+          setIsAuthChecking(false);
+        }
+      });
+      return () => unsubscribe();
+    }
+  }, []);
+
+  const handleLogin = async () => {
+    setAuthError('');
+    setIsAuthChecking(true);
+    setShowRedirectLogin(false);
+    try {
+      await signInWithPopup(auth, new GoogleAuthProvider());
+    } catch (error: any) {
+      console.error(error);
+      setIsAuthChecking(false);
+      if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/popup-blocked') {
+          setAuthError("彈出視窗被關閉或阻擋。請嘗試使用下方的「跳轉模式」。");
+          setShowRedirectLogin(true);
+      } else {
+          setAuthError(error.message || "Login failed");
+      }
+    }
+  };
+
+  const handleLoginRedirect = async () => {
+      setAuthError('');
+      setIsAuthChecking(true);
+      try {
+          await signInWithRedirect(auth, new GoogleAuthProvider());
+      } catch (e: any) {
+          setAuthError(e.message);
+          setIsAuthChecking(false);
+      }
+  };
+
+  const handleGuestLogin = async () => {
+      setAuthError('');
+      setIsAuthChecking(true);
+      try {
+          await signInAnonymously(auth);
+      } catch (error: any) {
+          setAuthError(error.message || "Guest login failed");
+          setIsAuthChecking(false);
+      }
+  };
+
+  const handleLogout = async () => {
+    await signOut(auth);
+    setTransactions([]);
+    setAvailableMonths([]);
+    setCurrentMonth('');
+    setIsMobileMenuOpen(false);
+  };
+
+  // --- Data Loading ---
+  const getRoomRef = (pid: string) => {
+    const isDemoConfig = firebaseConfig.apiKey === "DEMO";
+    if (!isDemoConfig) return doc(db, 'expense_rooms', pid);
+    return doc(db, 'artifacts', APP_ID_FIXED, 'public', 'data', 'shared_rooms', pid);
+  };
+
+  const loadLocalMonths = () => {
+    const storedMonths = localStorage.getItem(STORAGE_KEY_MONTHS);
+    if (storedMonths) {
+      const months = JSON.parse(storedMonths);
+      setAvailableMonths(months);
+      if (months.length > 0 && !currentMonth) setCurrentMonth(months[0]);
+    } else {
+      const now = new Date();
+      const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      setAvailableMonths([defaultMonth]);
+      if (!currentMonth) setCurrentMonth(defaultMonth);
+    }
+  };
+
+  const loadCloudRoom = async (pid: string) => {
+    setIsPermissionError(false);
+    try {
+      const docRef = getRoomRef(pid);
+      const unsubscribe = onSnapshot(docRef, (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data() as RoomData;
+          setCloudData(data);
+          const months = data.months || [];
+          setAvailableMonths(months);
+          if ((!currentMonth || !months.includes(currentMonth)) && months.length > 0) {
+              setCurrentMonth(months[0]);
+          }
+          if (currentMonth) {
+              setTransactions(data[`data_${currentMonth}`] || []);
+          }
+        } else {
+          setAvailableMonths([]);
+          setTransactions([]);
+          const def = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+          setCurrentMonth(def);
+        }
+        setIsAuthChecking(false);
+      }, (err) => {
+          if (err.code === 'permission-denied') {
+             setIsPermissionError(true);
+             setAuthError("讀取權限不足 (Permission Denied)。");
+          }
+          setIsAuthChecking(false);
+      });
+      return unsubscribe;
+    } catch (e) {
+      console.error(e);
+      setIsAuthChecking(false);
+    }
+  };
+
+  useEffect(() => {
+      if (!currentMonth) return;
+      if (cloudEnabled && cloudData) {
+          const txns = cloudData[`data_${currentMonth}`] || [];
+          setTransactions(txns);
+      } else if (!cloudEnabled && !user) {
+          const data = localStorage.getItem(STORAGE_KEY_PREFIX + currentMonth);
+          if (data) setTransactions(JSON.parse(data));
+          else setTransactions([]);
+      }
+      setHasUnsavedChanges(false);
+  }, [currentMonth, cloudData, cloudEnabled, user]);
+
+  const saveChanges = async () => {
+    if (!currentMonth) return;
+    setStatusMsg('儲存中...');
+    try {
+      if (cloudEnabled && user) {
+        const docRef = getRoomRef(pairingId);
+        const updateData: any = {
+            [`data_${currentMonth}`]: transactions,
+            lastUpdated: new Date().toISOString()
+        };
+        if (!availableMonths.includes(currentMonth)) {
+            const newMonths = [currentMonth, ...availableMonths].sort().reverse();
+            setAvailableMonths(newMonths); 
+            updateData.months = newMonths;
+        }
+        await setDoc(docRef, updateData, { merge: true });
+      } else {
+        localStorage.setItem(STORAGE_KEY_PREFIX + currentMonth, JSON.stringify(transactions));
+      }
+      setHasUnsavedChanges(false);
+      setStatusMsg('已儲存');
+      setTimeout(() => setStatusMsg(''), 2000);
+    } catch (e) { console.error(e); setStatusMsg('失敗'); }
+  };
+
+  const saveImmediate = async (month: string, txns: Transaction[]) => {
+    setTransactions(txns);
+    try {
+      if (cloudEnabled && user) {
+        const docRef = getRoomRef(pairingId);
+        const updateData: any = { [`data_${month}`]: txns, lastUpdated: new Date().toISOString() };
+        if (!availableMonths.includes(month)) {
+            const newMonths = [month, ...availableMonths].sort().reverse();
+            updateData.months = newMonths;
+        }
+        await setDoc(docRef, updateData, { merge: true });
+      } else {
+        localStorage.setItem(STORAGE_KEY_PREFIX + month, JSON.stringify(txns));
+      }
+      setHasUnsavedChanges(false);
+      setStatusMsg('已匯入');
+      setTimeout(() => setStatusMsg(''), 2000);
+    } catch(e) {}
+  };
+
+  // UI Handlers
+  const confirmPairingId = () => {
+    const pid = newPairingInput.trim();
+    setPairingId(pid);
+    localStorage.setItem(STORAGE_KEY_PAIRING, pid);
+    setShowPairingModal(false);
+    if (cloudEnabled && user) {
+        setIsAuthChecking(true);
+        loadCloudRoom(pid);
+    }
+  };
+
+  const handleAmexUpload = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const newTxns = parseAmexCSV(ev.target?.result as string);
+      saveImmediate(currentMonth, [...transactions, ...newTxns]);
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleTextSubmit = () => {
+    if (!textInput) return;
+    const year = currentMonth.split('-')[0] || '2025';
+    const newTxns = parseTextBill(textInput, year);
+    saveImmediate(currentMonth, [...transactions, ...newTxns]);
+    setTextInput('');
+    setShowTextModal(false);
+  };
+
+  const updateType = (id: string, newType: Transaction['type']) => {
+    setTransactions(prev => prev.map(t => t.id === id ? { ...t, type: newType } : t));
+    setHasUnsavedChanges(true);
+  };
+
+  const switchMonth = (m: string) => {
+    if (hasUnsavedChanges && confirm('未儲存變更，是否儲存？')) saveChanges();
+    setCurrentMonth(m);
+    setIsMobileMenuOpen(false);
+  };
+
+  const confirmCreateMonth = () => {
+    const m = newMonthInput.trim();
+    if (m) {
+        if (!availableMonths.includes(m)) {
+            const newM = [m, ...availableMonths].sort().reverse();
+            setAvailableMonths(newM);
+            if(!cloudEnabled) localStorage.setItem(STORAGE_KEY_MONTHS, JSON.stringify(newM));
+        }
+        setCurrentMonth(m);
+    }
+    setShowMonthModal(false);
+    setIsMobileMenuOpen(false);
+  };
+  const openCreateMonthModal = () => { setNewMonthInput(new Date().toISOString().slice(0, 7)); setShowMonthModal(true); };
+  const openDeleteModal = () => { if (currentMonth) setShowDeleteModal(true); };
+  const confirmDeleteMonth = async () => {
+    if (!currentMonth) return;
+    if (cloudEnabled && user) {
+        const docRef = getRoomRef(pairingId);
+        const newMonths = availableMonths.filter(m => m !== currentMonth);
+        await setDoc(docRef, { months: newMonths }, { merge: true });
+    } else {
+        localStorage.removeItem(STORAGE_KEY_PREFIX + currentMonth);
+    }
+    const newMonths = availableMonths.filter(m => m !== currentMonth);
+    setAvailableMonths(newMonths);
+    if (!cloudEnabled) localStorage.setItem(STORAGE_KEY_MONTHS, JSON.stringify(newMonths));
+    if(newMonths.length > 0) setCurrentMonth(newMonths[0]);
+    else {
+        const def = `${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
+        setAvailableMonths([def]);
+        setCurrentMonth(def);
+    }
+    setShowDeleteModal(false);
+  };
+  const handleSort = (key: keyof Transaction) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }));
+
+  // ... Calcs ...
+  const sortedTransactions = useMemo(() => {
+    let filtered = transactions;
+    if (filterCardholder === 'her') filtered = transactions.filter(t => t.isHerCard);
+    if (filterCardholder === 'me') filtered = transactions.filter(t => !t.isHerCard);
+    return [...filtered].sort((a, b) => {
+        const aVal = a[sortConfig.key as keyof Transaction];
+        const bVal = b[sortConfig.key as keyof Transaction];
+        if (sortConfig.key === 'date') return sortConfig.direction === 'asc' ? new Date(a.date).getTime() - new Date(b.date).getTime() : new Date(b.date).getTime() - new Date(a.date).getTime();
+        if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+    });
+  }, [transactions, filterCardholder, sortConfig]);
+
+  const summary = useMemo(() => {
+    let total = 0, sheOwesMe = 0, myCost = 0;
+    let amexTotal = 0;
+    let otherNoMP = 0;
+    let otherMP = 0;
+
+    transactions.forEach(t => {
+      total += t.amount;
+      if (t.type === 'her') sheOwesMe += t.amount;
+      else if (t.type === 'split') { sheOwesMe += t.amount / 2; myCost += t.amount / 2; }
+      else if (t.type === 'me' || t.type === 'gift') myCost += t.amount;
+
+      // 3-Way Breakdown Calculation
+      if (t.source === 'amex') {
+          amexTotal += t.amount;
+      } else if (t.source === 'other') {
+          if (t.description.toUpperCase().includes('MACAUPASS')) {
+              otherMP += t.amount;
+          } else {
+              otherNoMP += t.amount;
+          }
+      }
+    });
+    return { total, sheOwesMe, myCost, amexTotal, otherNoMP, otherMP };
+  }, [transactions]);
+
+  const formatMoney = (n: number, currency: string = 'HKD') => 
+      new Intl.NumberFormat('zh-HK', { style: 'currency', currency: currency }).format(n);
+  
+  const exportCSV = () => {
+    const BOM = '\uFEFF'; 
+    let csvContent = BOM + "日期,描述,持卡人,金額(HKD),分類,H需付金額(HKD)\n";
+    sortedTransactions.forEach(t => {
+      let shePays = 0;
+      let category = '';
+      if (t.type === 'her') { shePays = t.amount; category = 'H Pays'; }
+      else if (t.type === 'split') { shePays = t.amount / 2; category = 'AA'; }
+      else if (t.type === 'me') { category = 'M Pays'; }
+      else if (t.type === 'gift') { category = 'Gift'; }
+      const safeDesc = `"${t.description.replace(/"/g, '""')}"`;
+      csvContent += `${t.date},${safeDesc},${t.cardholder},${t.amount},${category},${shePays.toFixed(2)}\n`;
+    });
+    csvContent += `\n,,,Total,,${summary.sheOwesMe.toFixed(2)}\n`;
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `分帳報告_${currentMonth}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const SortHeader = ({ label, skey, width }: { label: string, skey: keyof Transaction, width?: string }) => (
+    <th className={`p-4 font-bold cursor-pointer hover:bg-slate-100 transition-colors ${width || ''}`} onClick={() => handleSort(skey)}>
+        <div className={`flex items-center gap-1 ${skey === 'amount' ? 'justify-end' : skey === 'type' ? 'justify-center' : ''}`}>
+            {label}
+            {sortConfig.key === skey && <span className="text-blue-500">{sortConfig.direction === 'asc' ? <ArrowUp size={14}/> : <ArrowDown size={14}/>}</span>}
+        </div>
+    </th>
+  );
+
+  if (!user && firebaseConfig.apiKey !== "DEMO") {
+      // ... Login Render (Same as before) ...
+      return (
+          <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50 text-slate-800 p-4">
+              <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md text-center">
+                  <div className="mb-6 flex justify-center">
+                      <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center text-blue-600">
+                          <Calculator size={32} />
+                      </div>
+                  </div>
+                  <h1 className="text-2xl font-bold mb-2">Expense Splitter</h1>
+                  <p className="text-slate-500 mb-8">請登入以存取共用帳單資料</p>
+                  
+                  {isPermissionError && (
+                      <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-lg flex items-start gap-2 text-left">
+                          <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
+                          <div><p className="font-bold text-sm">權限錯誤</p><p className="text-xs mt-1">請檢查 Firebase Rules</p></div>
+                      </div>
+                  )}
+
+                  {authError && !isPermissionError && <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-lg flex items-center gap-2 text-left"><AlertTriangle size={16} />{authError}</div>}
+
+                  {isAuthChecking ? <div className="flex justify-center p-2"><Loader2 className="animate-spin text-blue-500" /></div> : (
+                      <div className="space-y-3">
+                          <button onClick={handleLogin} className="w-full flex items-center justify-center gap-3 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-bold py-3 px-4 rounded-xl transition-all shadow-sm">
+                              <svg className="w-5 h-5" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+                              使用 Google 帳號登入
+                          </button>
+                          {showRedirectLogin && <button onClick={handleLoginRedirect} className="w-full flex items-center justify-center gap-3 bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-700 font-bold py-3 px-4 rounded-xl transition-all shadow-sm">使用跳轉模式登入</button>}
+                          <div className="relative flex py-1 items-center"><div className="flex-grow border-t border-gray-200"></div><span className="flex-shrink-0 mx-2 text-gray-400 text-xs">或</span><div className="flex-grow border-t border-gray-200"></div></div>
+                          <button onClick={handleGuestLogin} className="w-full flex items-center justify-center gap-3 bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 px-4 rounded-xl transition-all shadow-sm"><UserIcon size={18} />直接使用 (訪客登入)</button>
+                          <p className="text-xs text-slate-400 mt-2">訪客登入同樣支援雲端同步 (需使用共用 ID)</p>
+                      </div>
+                  )}
+              </div>
+          </div>
+      );
+  }
+
+  return (
+    <div className="flex flex-col md:flex-row min-h-screen bg-slate-50 font-sans text-slate-800">
+      {/* Mobile Header */}
+      <div className="md:hidden bg-white border-b border-slate-200 p-4 flex justify-between items-center sticky top-0 z-10 shadow-sm">
+         <div className="flex items-center gap-2">
+             <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="p-2 -ml-2 text-slate-600"><Menu size={24}/></button>
+             <h1 className="font-bold text-lg">{currentMonth}</h1>
+             {cloudEnabled ? <CloudCheck size={16} className="text-green-500"/> : <Save size={16} className="text-orange-400"/>}
+         </div>
+         <div className="flex gap-2">
+            {hasUnsavedChanges ? (
+                <button onClick={saveChanges} className="bg-green-600 text-white p-2 rounded-full shadow-md"><Save size={20}/></button>
+            ) : (
+                <div className="bg-slate-100 p-2 rounded-full text-slate-400"><CheckCircle size={20}/></div>
+            )}
+         </div>
+      </div>
+
+      {/* Sidebar (Desktop) / Drawer (Mobile) */}
+      <div className={`fixed inset-0 z-40 transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} transition-transform duration-300 md:relative md:translate-x-0 md:w-72 bg-white border-r border-slate-200 flex flex-col h-full`}>
+        <div className="p-6 border-b border-slate-100 flex justify-between items-center">
+          <h2 className="text-xl font-bold flex items-center gap-2 text-slate-800"><Calendar className="text-blue-600" size={20}/> 賬單記錄</h2>
+          <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden p-2 text-slate-400"><X size={24}/></button>
+        </div>
         
-        /* Tooltip for validation */
-        .tooltip-trigger:hover .tooltip-content { display: block; }
-    </style>
-</head>
-<body>
-    <div id="root"></div>
+        <div className="p-4 border-b border-slate-100 bg-slate-50">
+            <div className="text-xs font-bold text-slate-400 uppercase mb-2">共用設定</div>
+            <button onClick={() => { setNewPairingInput(pairingId); setShowPairingModal(true); }} className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-bold border ${pairingId ? 'bg-green-50 text-green-700 border-green-200' : 'bg-white text-gray-500 border-gray-200'}`}>
+                <span className="flex items-center gap-2"><LinkIcon size={14}/> {pairingId ? `ID: ${pairingId.substring(0,6)}...` : '未設定'}</span>
+                <span className="text-[10px] bg-white/50 px-1.5 py-0.5 rounded">設定</span>
+            </button>
+        </div>
 
-    <script type="text/babel">
-        const { useState, useEffect, useMemo, useRef, useCallback } = React;
+        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          <button onClick={openCreateMonthModal} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-blue-600 bg-blue-50 font-bold hover:bg-blue-100 transition-colors text-sm mb-4 border border-blue-100 shadow-sm">
+            <div className="bg-white p-1.5 rounded-lg"><Plus size={16}/></div> 新增月份
+          </button>
+          
+          {availableMonths.map(m => (
+            <button key={m} onClick={() => { switchMonth(m); setIsMobileMenuOpen(false); }} className={`w-full text-left px-4 py-3 rounded-xl font-medium transition-all flex justify-between items-center ${currentMonth === m ? 'bg-slate-800 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}>
+              <span>{m}</span>
+              {currentMonth === m && <div className="w-2 h-2 bg-green-400 rounded-full"></div>}
+            </button>
+          ))}
+        </div>
 
-        // --- ECS Reference Data (Comprehensive Non-Keyword Fields) ---
-        // Keep this as fallback or for validation logic in Builder
-        const ECS_NON_KEYWORD_FIELDS = {
-            // ... (Existing static data omitted for brevity, functionality relies on dynamic loading now for ECS tab) ...
-            "@timestamp": "date", "event.created": "date", "source.ip": "ip", "source.port": "long" // minimal fallback
-        };
+        {user && (
+            <div className="p-4 border-t border-slate-100">
+                <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 text-slate-400 hover:text-red-500 text-sm py-2 transition-colors">
+                    <LogOut size={16}/> 登出
+                </button>
+            </div>
+        )}
+      </div>
 
-        const validateEcsType = (value, type) => {
-            if (value === undefined || value === null || value === "") return true; 
-            const strVal = String(value).trim();
-            switch (type) {
-                case 'ip': return /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(strVal) || strVal.includes(':');
-                case 'long': case 'integer': return /^-?\d+$/.test(strVal) && !isNaN(parseInt(strVal));
-                case 'float': return !isNaN(parseFloat(strVal));
-                case 'boolean': return /^(true|false|0|1)$/i.test(strVal);
-                case 'date': return !isNaN(Date.parse(strVal)) || /^\d+$/.test(strVal) || (strVal.includes('-') && strVal.includes(':'));
-                case 'geo_point': if (typeof rawVal === 'object') return ('lat' in rawVal && 'lon' in rawVal); return strVal.includes(',') || strVal.includes('[');
-                default: return true;
-            }
-        };
+      {/* Main Content */}
+      <div className="flex-1 h-screen overflow-hidden flex flex-col bg-slate-50">
+        {/* Desktop Header */}
+        <div className="hidden md:flex justify-between items-center p-8 pb-4">
+            <div>
+              <h1 className="text-3xl font-extrabold text-slate-900 flex items-center gap-3">
+                {currentMonth || '請選擇月份'}
+                {cloudEnabled ? (
+                    <span className="text-xs font-normal bg-green-100 text-green-700 px-3 py-1.5 rounded-full flex items-center gap-1"><CloudCheck size={14}/> Room: {pairingId.substring(0,8)}...</span>
+                ) : <span className="text-xs font-normal bg-orange-100 text-orange-700 px-3 py-1.5 rounded-full flex items-center gap-1"><Save size={14}/> Local Only</span>}
+                {statusMsg ? <span className="text-xs font-normal bg-gray-100 text-gray-500 px-3 py-1.5 rounded-full flex items-center gap-1 animate-pulse">{statusMsg}</span> : hasUnsavedChanges ? <button onClick={saveChanges} className="text-xs font-bold bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded-full flex items-center gap-2 shadow-lg transition-all transform hover:-translate-y-0.5"><Save size={14}/> 儲存變更</button> : <span className="text-xs font-normal bg-slate-100 text-slate-500 px-3 py-1.5 rounded-full flex items-center gap-1"><CheckCircle size={14}/> 已儲存</span>}
+              </h1>
+            </div>
+            <div className="flex gap-2">
+                <button onClick={openDeleteModal} className="p-2 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"><Trash2 size={20}/></button>
+            </div>
+        </div>
 
-        const Icon = ({ path, size = 16, className = "" }) => (
-            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-                {path}
-            </svg>
-        );
-
-        const Icons = {
-            Code: <path d="m18 16 4-4-4-4M6 8l-4 4 4 4m6-8-4 8"/>,
-            Settings: <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.39a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/>,
-            ArrowRight: <path d="M5 12h14M12 5l7 7-7 7"/>,
-            Copy: <><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></>,
-            Check: <path d="M20 6 9 17l-5-5"/>,
-            Search: <><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></>,
-            Eye: <><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></>,
-            EyeOff: <><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></>,
-            Sliders: <><line x1="4" x2="4" y1="21" y2="14"/><line x1="4" x2="4" y1="10" y2="3"/><line x1="12" x2="12" y1="21" y2="12"/><line x1="12" x2="12" y1="8" y2="3"/><line x1="20" x2="20" y1="21" y2="16"/><line x1="20" x2="20" y1="12" y2="3"/><line x1="1" x2="7" y1="14" y2="14"/><line x1="9" x2="15" y1="8" y2="8"/><line x1="17" x2="23" y1="16" y2="16"/></>,
-            ArrowRightLeft: <><path d="m16 3 4 4-4 4"/><path d="M20 7H4"/><path d="m8 21-4-4 4-4"/><path d="M4 17h16"/></>,
-            Plus: <><path d="M5 12h14"/><path d="M12 5v14"/></>,
-            X: <><path d="M18 6 6 18"/><path d="m6 6 12 12"/></>,
-            AlertCircle: <><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></>,
-            CornerDownRight: <><polyline points="15 10 20 15 15 20"/><path d="M4 4v7a4 4 0 0 0 4 4h12"/></>,
-            Trash: <><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></>,
-            SortAsc: <><path d="M11 5h10"/><path d="M11 9h7"/><path d="M11 13h4"/><path d="M3 17l3 3 3-3"/><path d="M6 18V4"/></>,
-            List: <><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></>,
-            Flag: <><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" x2="4" y1="22" y2="15"/></>,
-            FileText: <><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/><line x1="10" x2="8" y1="9" y2="9"/></>,
-            Lock: <><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></>,
-            Unlock: <><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 9.9-1" /></>,
-            Bell: <><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></>,
-            FilePlus: <><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="12" x2="12" y1="18" y2="12"/><line x1="9" x2="15" y1="15" y2="15"/></>,
-            Upload: <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" x2="12" y1="3" y2="15" /></>,
-            History: <><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /><path d="M12 7v5l4 2" /></>,
-            Play: <polygon points="5 3 19 12 5 21 5 3" />,
-            RefreshCw: <><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></>,
-            AlertTriangle: <><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></>,
-            Info: <><circle cx="12" cy="12" r="10" /><line x1="12" x2="12" y1="16" y2="12" /><line x1="12" x2="12.01" y1="8" y2="8" /></>,
-            Save: <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />,
-            Edit: <><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></>,
-            Database: <><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></>,
-            Globe: <><circle cx="12" cy="12" r="10"/><line x1="2" x2="22" y1="12" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></>,
-            Filter: <><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></>,
-            ChevronDown: <polyline points="6 9 12 15 18 9" />,
-            ChevronRight: <polyline points="9 18 15 12 9 6" />
-        };
-
-        const SimpleIcon = ({ name, size, className }) => (
-            <Icon path={Icons[name] || Icons.Code} size={size} className={className} />
-        );
-
-        // --- Helpers ---
-        const findTempObject = (obj) => {
-            if (!obj || typeof obj !== 'object') return null;
-            if (Array.isArray(obj)) return null;
-            if ('_temp' in obj) return obj['_temp'];
-            for (const key in obj) {
-                if (typeof obj[key] === 'object' && obj[key] !== null) {
-                    const found = findTempObject(obj[key]);
-                    if (found) return found;
-                }
-            }
-            return null;
-        };
-
-        const extractKeys = (obj, prefix = '') => {
-            let keys = [];
-            for (const key in obj) {
-                if (typeof obj[key] === 'object' && obj[key] !== null && !Array.isArray(obj[key])) {
-                    keys = keys.concat(extractKeys(obj[key], prefix ? `${prefix}.${key}` : key));
-                } else {
-                    keys.push({ fullPath: prefix ? `${prefix}.${key}` : key, name: key, sampleValue: obj[key] });
-                }
-            }
-            return keys;
-        };
-
-        const parseExcelTSV = (text) => {
-            const rows = [];
-            let currentRow = [];
-            let currentCell = '';
-            let inQuotes = false;
-            
-            for (let i = 0; i < text.length; i++) {
-                const char = text[i];
-                const nextChar = text[i + 1];
-                
-                if (char === '"') {
-                    if (inQuotes && nextChar === '"') {
-                        currentCell += '"';
-                        i++; 
-                    } else {
-                        inQuotes = !inQuotes;
-                    }
-                } else if (char === '\t' && !inQuotes) {
-                    currentRow.push(currentCell);
-                    currentCell = '';
-                } else if ((char === '\r' || char === '\n') && !inQuotes) {
-                    if (char === '\r' && nextChar === '\n') i++;
-                    currentRow.push(currentCell);
-                    rows.push(currentRow);
-                    currentRow = [];
-                    currentCell = '';
-                } else {
-                    currentCell += char;
-                }
-            }
-            if (currentCell || currentRow.length > 0) {
-                currentRow.push(currentCell);
-                rows.push(currentRow);
-            }
-            return rows;
-        };
-
-        // --- Local Storage Hook ---
-        const useStickyState = (defaultValue, key) => {
-            const [value, setValue] = useState(() => {
-                const stickyValue = window.localStorage.getItem(key);
-                return stickyValue !== null ? JSON.parse(stickyValue) : defaultValue;
-            });
-            useEffect(() => {
-                window.localStorage.setItem(key, JSON.stringify(value));
-            }, [key, value]);
-            return [value, setValue];
-        };
-
-        const useStickyMapState = (key) => {
-            const [value, setValue] = useState(() => {
-                const stickyValue = window.localStorage.getItem(key);
-                return stickyValue !== null ? new Map(JSON.parse(stickyValue)) : new Map();
-            });
-            useEffect(() => {
-                window.localStorage.setItem(key, JSON.stringify(Array.from(value.entries())));
-            }, [key, value]);
-            return [value, setValue];
-        };
-
-        const ConversionEditor = ({ conversions, onAdd, onRemove, onEdit, placeholderPrefix }) => {
-            const [newFrom, setNewFrom] = useState("");
-            const [newTo, setNewTo] = useState("");
-            const [editingIdx, setEditingIdx] = useState(null);
-            const [editFrom, setEditFrom] = useState("");
-            const [editTo, setEditTo] = useState("");
-            const toInputRef = useRef(null);
-
-            const handleAdd = () => { if (newFrom && newTo) { onAdd(newFrom, newTo); setNewFrom(""); setNewTo(""); } };
-            const handleAddDefault = () => { setNewFrom("default"); setNewTo(""); if (toInputRef.current) toInputRef.current.focus(); };
-
-            const startEdit = (idx, from, to) => {
-                setEditingIdx(idx);
-                setEditFrom(from);
-                setEditTo(to);
-            };
-
-            const saveEdit = () => {
-                if (editFrom && editTo) {
-                    onEdit(editingIdx, editFrom, editTo);
-                    setEditingIdx(null);
-                }
-            };
-
-            const sortedConversions = useMemo(() => {
-                if (!conversions) return [];
-                const withIndex = conversions.map((c, i) => ({ ...c, idx: i }));
-                const defaults = withIndex.filter(c => c.from === 'default');
-                const others = withIndex.filter(c => c.from !== 'default');
-                return [...others, ...defaults];
-            }, [conversions]);
-
-            return (
-                <div className="space-y-2 pl-8"> 
-                    <div className="text-[10px] text-amber-500 font-semibold mb-1">VALUE CONVERSIONS</div>
-                    {sortedConversions.map((c) => (
-                        <div key={c.idx} className="flex items-center gap-2 text-xs">
-                            {editingIdx === c.idx ? (
+        <div className="flex-1 overflow-y-auto p-4 md:p-8 pt-0">
+            {/* Summary Cards - Compact Row */}
+            {transactions.length > 0 && (
+                <div className="mb-6 sticky top-0 md:relative z-10 bg-slate-50 pt-2 pb-2 shadow-sm md:shadow-none md:bg-transparent md:p-0"> 
+                    {/* Desktop View */}
+                    <div className="hidden md:grid grid-cols-3 gap-4">
+                         <div 
+                            className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 cursor-pointer hover:bg-slate-50 transition-colors relative group"
+                            onClick={() => setShowDetailSummary(!showDetailSummary)}
+                        >
+                            {!showDetailSummary ? (
                                 <>
-                                    <div className="flex-1 min-w-0"><input value={editFrom} onChange={(e) => setEditFrom(e.target.value)} className="w-full bg-slate-800 border border-blue-500 rounded px-2 py-1 text-xs outline-none" placeholder="From" /></div>
-                                    <SimpleIcon name="ArrowRight" size={10} className="text-slate-600" />
-                                    <div className="flex-1 min-w-0"><input value={editTo} onChange={(e) => setEditTo(e.target.value)} className="w-full bg-slate-800 border border-blue-500 rounded px-2 py-1 text-xs outline-none" placeholder="To" /></div>
-                                    <button onClick={saveEdit} className="text-emerald-500 hover:text-emerald-400 p-1"><SimpleIcon name="Check" size={14} /></button>
-                                    <button onClick={() => setEditingIdx(null)} className="text-slate-500 hover:text-slate-400 p-1"><SimpleIcon name="X" size={14} /></button>
+                                    <p className="text-xs font-bold text-slate-400 uppercase">總簽賬</p>
+                                    <p className="text-2xl font-extrabold text-slate-800 mt-1">{formatMoney(summary.total)}</p>
+                                    <p className="text-xs text-slate-400 mt-2">點擊查看分項</p>
                                 </>
                             ) : (
-                                <>
-                                    <div className={`flex-1 border rounded px-2 py-1 text-center truncate ${c.from === 'default' ? 'bg-amber-900/20 border-amber-700/50 text-amber-500 font-bold tracking-wider' : 'bg-slate-950 border-slate-700 text-slate-300'}`}>
-                                        {c.from === 'default' ? 'DEFAULT' : c.from}
-                                    </div>
-                                    <SimpleIcon name="ArrowRight" size={10} className="text-slate-600" />
-                                    <div className="flex-1 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-emerald-300 text-center truncate">{c.to}</div>
-                                    <div className="flex items-center gap-1">
-                                        <button onClick={() => startEdit(c.idx, c.from, c.to)} className="text-slate-500 hover:text-blue-400 p-1"><SimpleIcon name="Edit" size={12} /></button>
-                                        <button onClick={() => onRemove(c.idx)} className="text-slate-500 hover:text-red-400 p-1"><SimpleIcon name="Trash" size={12} /></button>
-                                    </div>
-                                </>
+                                <div className="flex flex-col justify-center h-full gap-1">
+                                    <div className="flex justify-between text-sm text-slate-600"><span>AMEX:</span> <span className="font-bold font-mono">{formatMoney(summary.amexTotal)}</span></div>
+                                    <div className="flex justify-between text-sm text-slate-600"><span>Other:</span> <span className="font-bold font-mono text-orange-600">{formatMoney(summary.otherNoMP, 'MOP')}</span></div>
+                                    <div className="flex justify-between text-sm text-slate-600"><span>MacauPass:</span> <span className="font-bold font-mono text-orange-600">{formatMoney(summary.otherMP, 'MOP')}</span></div>
+                                </div>
                             )}
                         </div>
-                    ))}
-                    <div className="flex items-center gap-2 bg-slate-900/50 p-1 rounded border border-slate-700/50">
-                        <div className="flex-1 min-w-0 relative"><input value={newFrom} onChange={(e) => setNewFrom(e.target.value)} placeholder="From" className="w-full bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs focus:border-amber-500 outline-none" /></div>
-                        <SimpleIcon name="ArrowRight" size={10} className="text-slate-500" />
-                        <input ref={toInputRef} value={newTo} onChange={(e) => setNewTo(e.target.value)} placeholder="To" className="flex-1 min-w-0 bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs focus:border-amber-500 outline-none" onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); }} />
-                        <button onClick={handleAddDefault} className="p-1 px-2 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-amber-500 text-[10px] rounded transition-colors" title="Set Default">Def</button>
-                        <button onClick={handleAdd} className="p-1 bg-slate-700 hover:bg-amber-600 hover:text-white text-slate-300 rounded transition-colors"><SimpleIcon name="Plus" size={12} /></button>
-                    </div>
-                </div>
-            );
-        };
-
-        // --- ECS Browser Component ---
-        const EcsLibrary = () => {
-            const [files, setFiles] = useState([]);
-            const [loading, setLoading] = useState(false);
-            const [selectedFile, setSelectedFile] = useState(null);
-            const [error, setError] = useState(null);
-            const [parsedFields, setParsedFields] = useState([]);
-            const [searchTerm, setSearchTerm] = useState("");
-            const [filterLevel, setFilterLevel] = useState('all'); // 'all', 'core'
-            const [expandedField, setExpandedField] = useState(null); // Track expanded row
-
-            useEffect(() => {
-                fetchFileList();
-            }, []);
-
-            const fetchFileList = async () => {
-                setLoading(true);
-                try {
-                    const res = await fetch("https://api.github.com/repos/elastic/ecs/contents/schemas?ref=main");
-                    if (!res.ok) throw new Error(`GitHub API Error: ${res.status}`);
-                    const data = await res.json();
-                    // Filter for .yml files
-                    const ymlFiles = data.filter(f => f.name.endsWith('.yml') && f.type === 'file');
-                    setFiles(ymlFiles);
-                } catch (e) {
-                    setError(e.message);
-                } finally {
-                    setLoading(false);
-                }
-            };
-
-            // Helper to process YAML object into field list
-            const processYamlToFields = (parsedYaml) => {
-                const flatFields = [];
-                const flatten = (obj, prefix = '') => {
-                    if (Array.isArray(obj)) {
-                        obj.forEach(item => {
-                            const currentName = item.name;
-                            const currentPath = prefix ? `${prefix}.${currentName}` : currentName;
-                            
-                            if (item.fields) {
-                                flatten(item.fields, currentPath);
-                            } else {
-                                flatFields.push({
-                                    name: currentPath,
-                                    type: item.type || 'keyword',
-                                    level: item.level || 'custom',
-                                    short: item.short || '',
-                                    description: item.description || '',
-                                    example: item.example || '',
-                                    allowed_values: item.allowed_values || null,
-                                    normalize: item.normalize || null
-                                });
-                            }
-                        });
-                    } else if (typeof obj === 'object') {
-                         for (const key in obj) {
-                             if (key === 'fields' && Array.isArray(obj[key])) {
-                                 flatten(obj[key], prefix);
-                             }
-                         }
-                    }
-                };
-                
-                if (Array.isArray(parsedYaml)) {
-                    parsedYaml.forEach(group => {
-                        const groupPrefix = group.name; 
-                        if (group.fields) {
-                            flatten(group.fields, groupPrefix);
-                        }
-                    });
-                } else if (typeof parsedYaml === 'object') {
-                     if (parsedYaml.fields) flatten(parsedYaml.fields, parsedYaml.name);
-                }
-                return flatFields;
-            };
-
-            const fetchSchemaContent = async (file) => {
-                setSelectedFile(file);
-                setParsedFields([]);
-                setLoading(true);
-                setFilterLevel('all'); // Reset filter on new file
-                setExpandedField(null); // Reset expansion
-                try {
-                    const res = await fetch(file.download_url);
-                    if (!res.ok) throw new Error("Failed to fetch file content");
-                    const text = await res.text();
-                    const parsed = jsyaml.load(text);
-                    const fields = processYamlToFields(parsed);
-                    setParsedFields(fields);
-                } catch (e) {
-                    setError("YAML Parse Error: " + e.message);
-                } finally {
-                    setLoading(false);
-                }
-            };
-
-            const scanAllCoreFields = async () => {
-                if (files.length === 0) return;
-                if (!confirm(`⚠️ WARNING: This will make ${files.length} requests to GitHub API.\n\nGitHub limits unauthenticated requests to 60 per hour.\n\nDo you want to proceed scanning for ALL CORE fields?`)) return;
-
-                setLoading(true);
-                setSelectedFile({ name: "Global Scan (Core Only)", path: "global_scan" });
-                setParsedFields([]);
-                setError(null);
-                setFilterLevel('core'); // Auto set to core
-                setExpandedField(null);
-
-                let allCore = [];
-                let failedCount = 0;
-
-                try {
-                    const batchSize = 5;
-                    for (let i = 0; i < files.length; i += batchSize) {
-                        const batch = files.slice(i, i + batchSize);
-                        const promises = batch.map(async (file) => {
-                            try {
-                                const res = await fetch(file.download_url);
-                                if (!res.ok) throw new Error(`Status ${res.status}`);
-                                const text = await res.text();
-                                const parsed = jsyaml.load(text);
-                                const fields = processYamlToFields(parsed);
-                                return fields.filter(f => f.level === 'core');
-                            } catch (err) {
-                                console.error(`Failed to fetch ${file.name}:`, err);
-                                failedCount++;
-                                return [];
-                            }
-                        });
-                        
-                        const results = await Promise.all(promises);
-                        results.forEach(fields => {
-                            allCore = [...allCore, ...fields];
-                        });
-                        setParsedFields([...allCore]);
-                    }
-                    
-                    if (failedCount > 0) setError(`Completed with ${failedCount} errors (rate limit might be reached).`);
-
-                } catch (e) {
-                    setError("Global Scan Error: " + e.message);
-                } finally {
-                    setLoading(false);
-                }
-            };
-
-            const copyToClipboard = (text) => {
-                navigator.clipboard.writeText(text);
-            };
-
-            const toggleExpand = (fieldName) => {
-                setExpandedField(expandedField === fieldName ? null : fieldName);
-            };
-
-            const filteredFields = parsedFields.filter(f => {
-                const matchesSearch = f.name.toLowerCase().includes(searchTerm.toLowerCase());
-                const matchesLevel = filterLevel === 'all' || f.level === filterLevel;
-                return matchesSearch && matchesLevel;
-            });
-
-            return (
-                <div className="flex h-full gap-4">
-                    <div className="w-1/4 min-w-[200px] flex flex-col gap-2 bg-slate-800/50 p-2 rounded-xl border border-slate-700">
-                        <div className="text-xs font-bold text-slate-400 px-2 py-1 flex justify-between items-center">
-                            <span>ECS SCHEMAS</span>
-                            <button onClick={fetchFileList} className="hover:text-white" title="Refresh List"><SimpleIcon name="RefreshCw" size={12}/></button>
+                        <div className="bg-gradient-to-br from-pink-500 to-rose-500 p-5 rounded-2xl shadow-lg shadow-pink-200 text-white flex flex-col justify-between">
+                            <p className="text-xs font-bold text-pink-100 uppercase">H 需付</p>
+                            <p className="text-3xl font-extrabold mt-1">{formatMoney(summary.sheOwesMe)}</p>
                         </div>
-                        
-                        <button 
-                            onClick={scanAllCoreFields}
-                            className="flex items-center gap-2 w-full text-left text-xs px-3 py-2 rounded bg-emerald-900/30 hover:bg-emerald-800/50 text-emerald-400 border border-emerald-800/50 transition-all mb-2"
+                        <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-between">
+                            <p className="text-xs font-bold text-slate-400 uppercase">M 實際支出</p>
+                            <p className="text-3xl font-extrabold text-slate-800 mt-1">{formatMoney(summary.myCost)}</p>
+                        </div>
+                    </div>
+
+                    {/* Mobile View - Compact Row */}
+                    <div className="md:hidden bg-white rounded-xl shadow-sm border border-slate-200 p-3 flex flex-col gap-3">
+                        <div 
+                            className="flex justify-between items-center border-b border-slate-100 pb-2 cursor-pointer"
+                            onClick={() => setShowDetailSummary(!showDetailSummary)}
                         >
-                            <SimpleIcon name="Search" size={12}/> Scan All Core Fields
-                        </button>
-
-                        {loading && !files.length && <div className="text-center text-xs text-slate-500 py-4">Loading GitHub...</div>}
-                        {error && <div className="text-xs text-red-400 p-2 bg-red-900/20 rounded border border-red-800/50">{error}</div>}
-                        
-                        <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1">
-                            {files.map(file => (
-                                <button 
-                                    key={file.path} 
-                                    onClick={() => fetchSchemaContent(file)}
-                                    className={`w-full text-left text-xs px-2 py-1.5 rounded truncate transition-colors ${selectedFile?.path === file.path ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-700 hover:text-slate-200'}`}
-                                >
-                                    {file.name}
-                                </button>
-                            ))}
+                             <div>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase">總簽賬</p>
+                                <p className="text-xl font-extrabold text-slate-800">{formatMoney(summary.total)}</p>
+                             </div>
+                             {/* Toggle Indicator */}
+                             <div className="text-slate-300 text-xs">{showDetailSummary ? '▼' : '▶'} 詳細</div>
                         </div>
-                    </div>
-                    
-                    <div className="flex-1 flex flex-col bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
-                        {!selectedFile ? (
-                            <div className="flex-1 flex items-center justify-center text-slate-500 text-sm italic">
-                                Select a schema file to view fields
-                            </div>
-                        ) : (
-                            <>
-                                <div className="p-3 border-b border-slate-700 flex justify-between items-center bg-slate-900/30 shrink-0">
-                                    <div className="flex items-center gap-3">
-                                        <div className="flex items-center gap-2">
-                                            <SimpleIcon name="FileText" size={14} className="text-blue-400"/>
-                                            <span className="font-bold text-slate-200 text-sm">{selectedFile.name}</span>
-                                            <span className="text-xs text-slate-500">({filteredFields.length} shown)</span>
-                                        </div>
-                                        <div className="flex bg-slate-800 rounded p-0.5 border border-slate-600">
-                                            <button 
-                                                onClick={() => setFilterLevel('all')} 
-                                                className={`px-2 py-0.5 text-[10px] rounded transition-colors ${filterLevel === 'all' ? 'bg-slate-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-                                            >
-                                                All
-                                            </button>
-                                            <button 
-                                                onClick={() => setFilterLevel('core')} 
-                                                className={`px-2 py-0.5 text-[10px] rounded transition-colors flex items-center gap-1 ${filterLevel === 'core' ? 'bg-emerald-700 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-                                            >
-                                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> Core Only
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div className="relative">
-                                        <input 
-                                            type="text" 
-                                            value={searchTerm}
-                                            onChange={(e) => setSearchTerm(e.target.value)}
-                                            placeholder="Search..." 
-                                            className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs focus:border-blue-500 outline-none w-40"
-                                        />
-                                        <div className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none"><SimpleIcon name="Search" size={12}/></div>
-                                    </div>
-                                </div>
-                                
-                                {loading && parsedFields.length === 0 ? (
-                                    <div className="flex-1 flex flex-col items-center justify-center text-slate-500 text-xs gap-2">
-                                        <SimpleIcon name="RefreshCw" size={20} className="animate-spin"/>
-                                        <span>Parsing YAML / Scanning...</span>
-                                    </div>
-                                ) : (
-                                    <div className="flex-1 overflow-y-auto custom-scrollbar p-0">
-                                        <table className="w-full text-left border-collapse relative table-fixed">
-                                            <thead className="bg-slate-800 sticky top-0 z-10 text-xs text-slate-400 font-semibold shadow-sm">
-                                                <tr>
-                                                    <th className="p-2 pl-3 border-b border-slate-700 w-8"></th>
-                                                    <th className="p-2 border-b border-slate-700 w-1/4">Field Name</th>
-                                                    <th className="p-2 border-b border-slate-700 w-16">Level</th>
-                                                    <th className="p-2 border-b border-slate-700 w-20">Type</th>
-                                                    <th className="p-2 border-b border-slate-700 w-1/4">Short Desc</th>
-                                                    <th className="p-2 border-b border-slate-700">Example</th>
-                                                    <th className="p-2 border-b border-slate-700 w-10"></th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className="text-xs">
-                                                {filteredFields.map((field, i) => {
-                                                    const isExpanded = expandedField === field.name;
-                                                    return (
-                                                        <React.Fragment key={i}>
-                                                            <tr className={`hover:bg-slate-700/30 transition-colors group border-b border-slate-800/50 cursor-pointer ${isExpanded ? 'bg-slate-800/50' : ''}`} onClick={() => toggleExpand(field.name)}>
-                                                                <td className="p-2 text-center text-slate-500">
-                                                                    {isExpanded ? <SimpleIcon name="ChevronDown" size={10}/> : <SimpleIcon name="ChevronRight" size={10}/>}
-                                                                </td>
-                                                                <td className="p-2 text-emerald-300 font-mono break-all">{field.name}</td>
-                                                                <td className="p-2">
-                                                                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${field.level === 'core' ? 'bg-emerald-900/50 text-emerald-400 border border-emerald-800' : 'bg-slate-700 text-slate-400'}`}>
-                                                                        {field.level}
-                                                                    </span>
-                                                                </td>
-                                                                <td className="p-2 text-purple-300">{field.type}</td>
-                                                                <td className="p-2 text-slate-400 truncate" title={field.short}>{field.short}</td>
-                                                                <td className="p-2 text-slate-500 italic truncate" title={field.example}>{field.example}</td>
-                                                                <td className="p-2 text-right pr-3">
-                                                                    <button 
-                                                                        onClick={(e) => { e.stopPropagation(); copyToClipboard(field.name); }} 
-                                                                        className="text-slate-600 hover:text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity"
-                                                                        title="Copy Field Name"
-                                                                    >
-                                                                        <SimpleIcon name="Copy" size={12}/>
-                                                                    </button>
-                                                                </td>
-                                                            </tr>
-                                                            {isExpanded && (
-                                                                <tr className="bg-slate-900/30">
-                                                                    <td colSpan="7" className="p-0">
-                                                                        <div className="p-4 border-b border-slate-800 grid gap-4 text-xs animate-fade-in">
-                                                                            {/* Description */}
-                                                                            <div>
-                                                                                <h4 className="text-slate-500 font-bold uppercase mb-1 tracking-wider text-[10px]">Description</h4>
-                                                                                <div className="text-slate-300 whitespace-pre-wrap leading-relaxed">{field.description || field.short || "No description available."}</div>
-                                                                            </div>
-                                                                            
-                                                                            {/* Allowed Values */}
-                                                                            {field.allowed_values && field.allowed_values.length > 0 && (
-                                                                                <div>
-                                                                                    <h4 className="text-amber-500 font-bold uppercase mb-1 tracking-wider text-[10px] flex items-center gap-2">Allowed Values <span className="bg-amber-900/30 px-1.5 rounded text-amber-300 text-[9px]">{field.allowed_values.length}</span></h4>
-                                                                                    <div className="border border-slate-700 rounded bg-slate-900/50 overflow-hidden">
-                                                                                        <table className="w-full">
-                                                                                            <thead className="bg-slate-800 text-slate-400 text-left">
-                                                                                                <tr>
-                                                                                                    <th className="p-2 border-b border-slate-700 w-1/4">Value</th>
-                                                                                                    <th className="p-2 border-b border-slate-700">Description</th>
-                                                                                                </tr>
-                                                                                            </thead>
-                                                                                            <tbody>
-                                                                                                {field.allowed_values.map((av, idx) => (
-                                                                                                    <tr key={idx} className="border-b border-slate-800/50 last:border-0">
-                                                                                                        <td className="p-2 font-mono text-amber-200">{av.name}</td>
-                                                                                                        <td className="p-2 text-slate-400">{av.description}</td>
-                                                                                                    </tr>
-                                                                                                ))}
-                                                                                            </tbody>
-                                                                                        </table>
-                                                                                    </div>
-                                                                                </div>
-                                                                            )}
 
-                                                                            {/* Normalization & Extra Info */}
-                                                                            <div className="flex gap-8">
-                                                                                {field.normalize && (
-                                                                                    <div>
-                                                                                        <h4 className="text-blue-400 font-bold uppercase mb-1 tracking-wider text-[10px]">Normalization</h4>
-                                                                                        <div className="flex gap-1">
-                                                                                            {field.normalize.map((n, idx) => (
-                                                                                                <span key={idx} className="px-1.5 py-0.5 bg-blue-900/30 border border-blue-800 text-blue-300 rounded">{n}</span>
-                                                                                            ))}
-                                                                                        </div>
-                                                                                    </div>
-                                                                                )}
-                                                                                {field.example && (
-                                                                                    <div>
-                                                                                        <h4 className="text-slate-500 font-bold uppercase mb-1 tracking-wider text-[10px]">Example</h4>
-                                                                                        <code className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded text-slate-300">{field.example}</code>
-                                                                                    </div>
-                                                                                )}
-                                                                            </div>
-                                                                        </div>
-                                                                    </td>
-                                                                </tr>
-                                                            )}
-                                                        </React.Fragment>
-                                                    );
-                                                })}
-                                                {filteredFields.length === 0 && (
-                                                    <tr><td colSpan="7" className="p-8 text-center text-slate-500 italic">No matching fields found</td></tr>
-                                                )}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                )}
-                            </>
+                        {/* Expandable Detail Section */}
+                        {showDetailSummary && (
+                            <div className="grid grid-cols-3 gap-2 text-center bg-slate-50 p-2 rounded-lg mb-2 animate-fade-in">
+                                <div>
+                                    <p className="text-[9px] text-slate-400">AMEX</p>
+                                    <p className="text-xs font-bold text-slate-700">{formatMoney(summary.amexTotal)}</p>
+                                </div>
+                                <div>
+                                    <p className="text-[9px] text-slate-400">Other</p>
+                                    <p className="text-xs font-bold text-orange-600">{formatMoney(summary.otherNoMP, 'MOP')}</p>
+                                </div>
+                                <div>
+                                    <p className="text-[9px] text-slate-400">MP</p>
+                                    <p className="text-xs font-bold text-orange-600">{formatMoney(summary.otherMP, 'MOP')}</p>
+                                </div>
+                            </div>
                         )}
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <p className="text-[10px] font-bold text-pink-500 uppercase">H 需付</p>
+                                <p className="text-lg font-extrabold text-slate-800">{formatMoney(summary.sheOwesMe)}</p>
+                            </div>
+                            <div className="text-right">
+                                <p className="text-[10px] font-bold text-blue-500 uppercase">M 實際支出</p>
+                                <p className="text-lg font-extrabold text-slate-800">{formatMoney(summary.myCost)}</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
-            );
-        };
+            )}
 
-        const App = () => {
-            const defaultInput = ""; 
-            const [activeTab, setActiveTab] = useState('builder');
-            const [inputStr, setInputStr] = useStickyState(defaultInput, 'jcb_inputStr');
-            const [bulkMapStr, setBulkMapStr] = useStickyState("", 'jcb_bulkMapStr');
-            const [moduleName, setModuleName] = useStickyState("", 'jcb_moduleName'); 
-            const [ignoreStr, setIgnoreStr] = useStickyState("password, v, deprecated_field", 'jcb_ignoreStr');
-            const [sortOrder, setSortOrder] = useStickyState('original', 'jcb_sortOrder');
-            const [mappings, setMappings] = useStickyState({}, 'jcb_mappings'); 
-            const [extraMappings, setExtraMappings] = useStickyState({}, 'jcb_extraMappings'); 
-            const [excludedKeys, setExcludedKeys] = useStickyState({}, 'jcb_excludedKeys');
-            const [conversions, setConversions] = useStickyState({}, 'jcb_conversions');
-            const [expandedPanels, setExpandedPanels] = useState({}); 
-            const [historyFields, setHistoryFields] = useStickyMapState('jcb_historyFields');
-            const [inputHistory, setInputHistory] = useStickyState([], 'jcb_inputHistory');
-            const [draftInput, setDraftInput] = useStickyState({ content: "", title: "" }, 'jcb_draftInput');
-            const [viewingId, setViewingId] = useState(null); 
-            const [inputTitle, setInputTitle] = useState(""); 
-            const [bulkLog, setBulkLog] = useStickyState([], 'jcb_bulkLog');
-            const [parsedJson, setParsedJson] = useState(null);
-            const [error, setError] = useState(null);
-            const [copySuccess, setCopySuccess] = useState(false);
-            const [searchTerm, setSearchTerm] = useState("");
+            {/* Tools - Compact Row for Mobile */}
+            <div className="flex gap-2 mb-4 overflow-x-auto pb-2 md:grid md:grid-cols-2 md:gap-3 md:mb-6 md:overflow-visible md:pb-0">
+                <label className="flex-1 min-w-[140px] flex flex-col items-center justify-center p-3 bg-white border border-slate-200 border-dashed rounded-xl cursor-pointer hover:border-blue-400 active:scale-95 transition-all">
+                    <input type="file" accept=".csv" onChange={handleAmexUpload} className="hidden" />
+                    <div className="text-blue-600 mb-1"><Upload size={20}/></div>
+                    <span className="text-xs font-bold text-slate-600">匯入 AMEX</span>
+                </label>
+                <button onClick={() => setShowTextModal(true)} className="flex-1 min-w-[140px] flex flex-col items-center justify-center p-3 bg-white border border-slate-200 border-dashed rounded-xl cursor-pointer hover:border-purple-400 active:scale-95 transition-all">
+                    <div className="text-purple-600 mb-1"><Clipboard size={20}/></div>
+                    <span className="text-xs font-bold text-slate-600">貼上帳單</span>
+                </button>
+            </div>
 
-            const ignoreList = useMemo(() => ignoreStr.split(/[,，\n]+/).map(s => s.trim()).filter(s => s), [ignoreStr]);
-            const sampleInput = JSON.stringify({ "_temp": { "username": "peter", "action": "pass", "status": "1", "role": "admin", "deprecated_field": "ignore_me" } }, null, 2);
-
-            useEffect(() => {
-                if (viewingId === null) {
-                    if (inputStr === draftInput.content) {
-                        setInputTitle(draftInput.title);
-                    }
-                }
-            }, []);
-
-            useEffect(() => {
-                if (viewingId === null) {
-                    setDraftInput({ content: inputStr, title: inputTitle });
-                }
-            }, [inputStr, inputTitle, viewingId]);
-
-            useEffect(() => {
-                try {
-                    if (!inputStr.trim()) { setParsedJson(null); setError(null); return; }
-                    const rawParsed = JSON.parse(inputStr);
-                    const tempObj = findTempObject(rawParsed);
-                    if (tempObj) { setParsedJson(tempObj); setError(null); }
-                    else { setParsedJson(null); setError("找不到 '_temp' 物件"); }
-                } catch (e) { setError("JSON 格式錯誤"); setParsedJson(null); }
-            }, [inputStr]);
-
-            const currentInputKeys = useMemo(() => (!parsedJson ? [] : extractKeys(parsedJson)), [parsedJson]);
-
-            const handleResetApp = () => {
-                if(confirm("Are you sure you want to clear all data and reset?")) {
-                    localStorage.clear();
-                    window.location.reload();
-                }
-            };
-
-            const handleLoadSample = () => {
-                setInputStr(sampleInput);
-                setInputTitle("Sample Data");
-            };
-
-            const mergedKeys = useMemo(() => {
-                const keysMap = new Map();
-                historyFields.forEach((k, name) => { keysMap.set(name, { ...k, oldValue: k.sampleValue, newValue: undefined, sampleValue: k.sampleValue }); });
-                currentInputKeys.forEach(k => {
-                    if (keysMap.has(k.name)) {
-                        const existing = keysMap.get(k.name);
-                        keysMap.set(k.name, { ...existing, newValue: k.sampleValue, sampleValue: k.sampleValue });
-                    } else {
-                        keysMap.set(k.name, { ...k, oldValue: undefined, newValue: k.sampleValue, sampleValue: k.sampleValue });
-                    }
-                });
-                return Array.from(keysMap.values());
-            }, [historyFields, currentInputKeys]);
-
-            const filteredKeys = useMemo(() => {
-                const searchLower = searchTerm.toLowerCase();
-                const currentPrefix = moduleName.trim() || 'user';
-                let keys = mergedKeys.filter(k => {
-                    const isIgnored = ignoreList.includes(k.name);
-                    if (isIgnored) return false;
-                    if (!searchLower) return true;
-                    if (k.name.toLowerCase().includes(searchLower)) return true;
-                    if (k.fullPath.toLowerCase().includes(searchLower)) return true;
-                    const userDefined = mappings[k.name];
-                    const effectiveTarget = userDefined !== undefined ? userDefined : `${currentPrefix}.${k.name}`;
-                    if (effectiveTarget.toLowerCase().includes(searchLower)) return true;
-                    if (extraMappings[k.name] && Array.isArray(extraMappings[k.name])) {
-                        if (extraMappings[k.name].some(ex => ex.path && ex.path.toLowerCase().includes(searchLower))) return true;
-                    }
-                    return false;
-                });
-                if (sortOrder === 'az') keys.sort((a, b) => a.name.localeCompare(b.name));
-                return keys;
-            }, [mergedKeys, searchTerm, ignoreList, sortOrder, mappings, moduleName, extraMappings]);
-
-            const outputJson = useMemo(() => {
-                const prefix = moduleName.trim() || 'user';
-                const directory = [];
-                let processKeys = mergedKeys.filter(k => !ignoreList.includes(k.name) && !excludedKeys[k.name]);
-                if (sortOrder === 'az') processKeys.sort((a, b) => a.name.localeCompare(b.name));
-
-                processKeys.forEach(k => {
-                    const userDefinedTo = mappings[k.name] || "";
-                    const defaultTo = `${prefix}.${k.name}`;
-                    let primaryConvertData = undefined;
-                    if (conversions[k.name] && conversions[k.name].length > 0) {
-                        primaryConvertData = {};
-                        conversions[k.name].forEach(c => { if (c.from && c.to) primaryConvertData[c.from] = c.to; });
-                    }
-                    const primaryEntry = { name: k.name, to: userDefinedTo || defaultTo };
-                    if (primaryConvertData && Object.keys(primaryConvertData).length > 0) primaryEntry.convert = primaryConvertData;
-                    directory.push(primaryEntry);
-
-                    if (extraMappings[k.name] && Array.isArray(extraMappings[k.name])) {
-                        extraMappings[k.name].forEach(extraObj => {
-                            if (!extraObj) return;
-                            const extraEntry = { name: k.name, to: extraObj.path || `${prefix}.${k.name}_copy` };
-                            if (extraObj.conversions && extraObj.conversions.length > 0) {
-                                const extraConvertData = {};
-                                extraObj.conversions.forEach(c => { if (c.from && c.to) extraConvertData[c.from] = c.to; });
-                                if (Object.keys(extraConvertData).length > 0) extraEntry.convert = extraConvertData;
-                            }
-                            directory.push(extraEntry);
-                        });
-                    }
-                });
-                return JSON.stringify({ module: moduleName, ignore: ignoreList, directory: directory }, null, 2);
-            }, [moduleName, ignoreList, mergedKeys, mappings, excludedKeys, conversions, extraMappings, sortOrder]);
-
-            const handleInputNew = () => {
-                setHistoryFields(prev => { const newHistory = new Map(prev); currentInputKeys.forEach(k => newHistory.set(k.name, k)); return newHistory; });
-                setInputStr("");
-            };
-            
-            const handleSaveAndAdd = () => {
-                if (!inputTitle.trim()) { alert("Please enter a Title for this input."); return; }
-                const newItem = { id: Date.now(), title: inputTitle, content: inputStr, timestamp: new Date().toLocaleString() };
-                setInputHistory(prev => [newItem, ...prev]);
-                setHistoryFields(prev => { const newHistory = new Map(prev); currentInputKeys.forEach(k => newHistory.set(k.name, k)); return newHistory; });
-                setInputStr(""); setInputTitle(""); setDraftInput({ content: "", title: "" });
-            };
-
-            const handleViewModeChange = (e) => {
-                const id = e.target.value === "draft" ? null : parseInt(e.target.value);
-                setViewingId(id);
-                if (id === null) { setInputStr(draftInput.content); setInputTitle(draftInput.title); }
-                else { const item = inputHistory.find(i => i.id === id); if (item) { setInputStr(item.content); setInputTitle(item.title); } }
-            };
-
-            const handleMappingChange = (keyName, newValue) => {
-                const defaultTo = `${(moduleName.trim() || 'user')}.${keyName}`;
-                if (newValue === defaultTo) { setMappings(prev => { const next = { ...prev }; delete next[keyName]; return next; }); }
-                else { setMappings(prev => ({ ...prev, [keyName]: newValue })); }
-            };
-            const toggleExclude = (keyName) => setExcludedKeys(prev => ({ ...prev, [keyName]: !prev[keyName] }));
-            const togglePanel = (panelId) => setExpandedPanels(prev => ({ ...prev, [panelId]: !prev[panelId] }));
-            const handleBulkImport = (value) => setBulkMapStr(value);
-            
-            const applyBulkImport = () => {
-                const rawRows = parseExcelTSV(bulkMapStr);
-                const processedRows = [];
-                let previousRow = null;
-
-                rawRows.forEach(row => {
-                    if (row.length === 0) return;
-                    let cells = row.map(c => c.trim());
-                    
-                    if (cells.length === 1) {
-                         const line = cells[0];
-                         const noConvertMatch = line.match(/^(\S+)\s+(no\s+convert)\s+(\S+)$/i);
-                         if (noConvertMatch) {
-                             cells = [noConvertMatch[1], noConvertMatch[2], noConvertMatch[3]];
-                         }
-                         else if (!line.includes('=>') && !line.startsWith('"')) {
-                            const firstSpace = line.indexOf(' ');
-                            if (firstSpace > 0) {
-                                const keyPart = line.substring(0, firstSpace).trim();
-                                const restPart = line.substring(firstSpace).trim();
-                                if (restPart.includes('=>') || restPart.startsWith('"')) {
-                                    cells = [keyPart, restPart]; // Force split
-                                }
-                            }
-                        }
-                    }
-
-                    const looksLikeConversion = cells[0].includes('=>') || cells[0].startsWith('"');
-                    const isContinuation = previousRow && looksLikeConversion;
-
-                    if (isContinuation) {
-                        if (cells.length === 1) {
-                            const spaceTargetMatch = cells[0].match(/(=>.*?)(\s+)([a-zA-Z0-9_@.-]+)$/);
-                            if (spaceTargetMatch) {
-                                const convPart = cells[0].substring(0, cells[0].lastIndexOf(spaceTargetMatch[3])).trim();
-                                const targetPart = spaceTargetMatch[3];
-                                cells = [convPart, targetPart];
-                            }
-                        }
-
-                        if (previousRow.length < 2) previousRow.push("");
-                        previousRow[1] = previousRow[1] + "\n" + cells[0];
-                        
-                        if (cells.length > 1) {
-                            if (previousRow.length < 3) {
-                                previousRow.push(cells[1]);
-                            } else {
-                                previousRow[2] = cells[1];
-                            }
-                        }
-                    } else {
-                        previousRow = cells;
-                        processedRows.push(previousRow);
-                    }
-                });
-
-                const newMappings = {}; 
-                const newConversions = {}; 
-                const newExtraMappings = {}; 
-
-                const parseConversions = (convStr) => {
-                    if (!convStr || convStr.match(/no\s*convert/i)) return [];
-                    const rules = convStr.split('\n');
-                    const parsedRules = [];
-                    rules.forEach(rule => {
-                         const parts = rule.split('=>');
-                         if (parts.length === 2) {
-                             let from = parts[0].trim();
-                             let to = parts[1].trim();
-                             from = from.replace(/^"+|"+$/g, '');
-                             to = to.replace(/^"+|"+$/g, '');
-                             if (from && to) parsedRules.push({ from, to });
-                         }
-                    });
-                    return parsedRules;
-                };
-
-                const groupedImports = {};
-                
-                processedRows.forEach(row => {
-                    const key = row[0];
-                    if (key.toLowerCase() === "original field" || key.toLowerCase() === "field name") return;
-
-                    let target = "";
-                    let convs = [];
-
-                    if (row.length >= 3) {
-                        const convStr = row[1];
-                        target = row[2];
-                        convs = parseConversions(convStr);
-                    } else if (row.length === 2) {
-                         if (row[1].includes('=>')) {
-                             convs = parseConversions(row[1]);
-                             target = ""; // Missing target
-                         } else {
-                             target = row[1];
-                         }
-                    }
-
-                    if (key) {
-                        if (!groupedImports[key]) groupedImports[key] = [];
-                        groupedImports[key].push({ target, convs });
-                    }
-                });
-
-                const changes = [];
-                
-                Object.keys(groupedImports).forEach(key => {
-                    const entries = groupedImports[key];
-                    const primary = entries[0];
-                    const oldTarget = mappings[key];
-                    
-                    if (primary.target) {
-                        newMappings[key] = primary.target;
-                    }
-                    
-                    if (primary.convs.length > 0) newConversions[key] = primary.convs;
-                    else newConversions[key] = []; 
-
-                    if (primary.target) {
-                        if (oldTarget !== undefined && oldTarget !== primary.target) {
-                            changes.push({ key, from: oldTarget, to: primary.target, type: 'mapping' });
-                        } else if (oldTarget === undefined) {
-                            changes.push({ key, from: "None", to: primary.target, type: 'new_mapping' });
-                        }
-                    }
-
-                    if (entries.length > 1) {
-                        const validExtras = entries.slice(1).filter(e => e.target).map(e => ({ path: e.target, conversions: e.convs }));
-                        
-                        if (validExtras.length > 0) {
-                            newExtraMappings[key] = validExtras;
-                            changes.push({ key, type: 'extra_added', count: validExtras.length });
-                        }
-                    } else {
-                        if (extraMappings[key]) newExtraMappings[key] = []; 
-                    }
-                });
-
-                setMappings(prev => ({ ...prev, ...newMappings }));
-                setConversions(prev => ({ ...prev, ...newConversions }));
-                setExtraMappings(prev => ({ ...prev, ...newExtraMappings }));
-
-                if (changes.length > 0) {
-                    setBulkLog(prev => [{ id: Date.now(), time: new Date().toLocaleTimeString(), changes }, ...prev]);
-                } else {
-                    setBulkLog(prev => [{ id: Date.now(), time: new Date().toLocaleTimeString(), type: 'info', message: "No modifications." }, ...prev]);
-                }
-            };
-
-            const addExtraMapping = (keyName) => setExtraMappings(prev => ({ ...prev, [keyName]: [...(prev[keyName] || []), { path: "", conversions: [] }] }));
-            const updateExtraMapping = (keyName, index, value) => setExtraMappings(prev => { const list = [...(prev[keyName] || [])]; if(list[index]) list[index] = {...list[index], path: value}; return { ...prev, [keyName]: list }; });
-            const removeExtraMapping = (keyName, index) => setExtraMappings(prev => { const list = [...(prev[keyName] || [])]; list.splice(index, 1); return { ...prev, [keyName]: list }; });
-            const addConversion = (keyName, f, t) => { if(!f||!t)return; setConversions(prev => ({ ...prev, [keyName]: [...(prev[keyName] || []), { from: f, to: t }] })); };
-            const updateConversion = (keyName, idx, newFrom, newTo) => { setConversions(prev => { const list = [...(prev[keyName] || [])]; if(list[idx]) list[idx] = { from: newFrom, to: newTo }; return { ...prev, [keyName]: list }; }); };
-            const removeConversion = (keyName, i) => setConversions(prev => { const list = [...(prev[keyName] || [])]; list.splice(i, 1); return { ...prev, [keyName]: list }; });
-            const addExtraConversion = (keyName, eIdx, f, t) => { if(!f||!t)return; setExtraMappings(prev => { const list = [...(prev[keyName] || [])]; const item = {...list[eIdx]}; item.conversions = [...(item.conversions||[]), {from:f, to:t}]; list[eIdx]=item; return {...prev, [keyName]: list}; }); };
-            const updateExtraConversion = (keyName, eIdx, cIdx, newFrom, newTo) => { setExtraMappings(prev => { const list = [...(prev[keyName] || [])]; const item = {...list[eIdx]}; if(item.conversions && item.conversions[cIdx]) { const nc = [...item.conversions]; nc[cIdx] = {from: newFrom, to: newTo}; item.conversions = nc; } list[eIdx]=item; return {...prev, [keyName]: list}; }); };
-            const removeExtraConversion = (keyName, eIdx, cIdx) => setExtraMappings(prev => { const list = [...(prev[keyName] || [])]; const item = {...list[eIdx]}; if(item.conversions){ const nc = [...item.conversions]; nc.splice(cIdx, 1); item.conversions = nc; } list[eIdx]=item; return {...prev, [keyName]: list}; });
-            const handleCopy = () => { navigator.clipboard.writeText(outputJson).then(() => { setCopySuccess(true); setTimeout(() => setCopySuccess(false), 2000); }); };
-
-            const isModuleEmpty = !moduleName;
-            const isViewingHistory = viewingId !== null;
-
-            return (
-                <div className="flex flex-col h-screen p-4 gap-4 overflow-hidden relative">
-                    <header className="flex items-center justify-between border-b border-slate-700 pb-2 shrink-0">
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 bg-blue-600 rounded-lg"><SimpleIcon name="Code" className="text-white" size={20} /></div>
-                            <h1 className="text-lg font-bold text-white">JSON Mapping Config Builder</h1>
+            {/* Transactions List */}
+            {transactions.length > 0 ? (
+                <div className="space-y-4 pb-24 md:pb-0">
+                    {/* Desktop Table */}
+                    <div className="hidden md:block bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                        <div className="flex justify-between items-center p-4 border-b border-slate-100 bg-slate-50/50">
+                             <div className="flex gap-2">
+                                <button onClick={() => setFilterCardholder('all')} className={`px-3 py-1 rounded-md text-xs font-bold ${filterCardholder==='all'?'bg-slate-800 text-white':'bg-white border'}`}>All</button>
+                                <button onClick={() => setFilterCardholder('me')} className={`px-3 py-1 rounded-md text-xs font-bold ${filterCardholder==='me'?'bg-blue-600 text-white':'bg-white border'}`}>Main</button>
+                                <button onClick={() => setFilterCardholder('her')} className={`px-3 py-1 rounded-md text-xs font-bold ${filterCardholder==='her'?'bg-pink-500 text-white':'bg-white border'}`}>Sub</button>
+                             </div>
+                             <button onClick={exportCSV} className="text-green-600 hover:bg-green-50 p-2 rounded"><FileSpreadsheet size={18}/></button>
                         </div>
-                        <div className="flex items-center gap-4">
-                            <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700">
-                                <button 
-                                    onClick={() => setActiveTab('builder')}
-                                    className={`px-3 py-1 text-xs rounded-md transition-all flex items-center gap-1 ${activeTab === 'builder' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
-                                >
-                                    <SimpleIcon name="Database" size={12}/> Builder
-                                </button>
-                                <button 
-                                    onClick={() => setActiveTab('ecs')}
-                                    className={`px-3 py-1 text-xs rounded-md transition-all flex items-center gap-1 ${activeTab === 'ecs' ? 'bg-slate-700 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
-                                >
-                                    <SimpleIcon name="Globe" size={12}/> ECS Library
-                                </button>
-                            </div>
-                            <div className="h-4 w-px bg-slate-700"></div>
-                            <div className="text-xs text-slate-500">v4.2 Full Schema Details</div>
-                            <button onClick={handleResetApp} className="flex items-center gap-1 text-xs bg-red-900/50 hover:bg-red-800 text-red-200 px-2 py-1 rounded border border-red-700/50 transition-colors"><SimpleIcon name="RefreshCw" size={12} /> Reset</button>
-                        </div>
-                    </header>
-
-                    {activeTab === 'ecs' ? (
-                        <EcsLibrary />
-                    ) : (
-                        <div className="flex flex-1 gap-4 min-h-0">
-                            <div className="w-1/5 flex flex-col gap-2 min-w-[200px]">
-                                <div className="flex items-center justify-between">
-                                    <label className="flex items-center gap-2 text-xs font-semibold text-blue-400"><span className="w-2 h-2 rounded-full bg-blue-400"></span>Input (Contains "_temp")</label>
-                                    <div className="flex items-center gap-1">
-                                        <select value={viewingId === null ? "draft" : viewingId} onChange={handleViewModeChange} className="w-24 bg-slate-800 border border-slate-600 rounded px-1 py-0.5 text-[10px] focus:border-blue-500 outline-none text-slate-300 mr-1">
-                                            <option value="draft">Draft</option>
-                                            {inputHistory.map(item => <option key={item.id} value={item.id}>{item.title}</option>)}
-                                        </select>
-                                    </div>
-                                </div>
-                                {!isViewingHistory && <input type="text" value={inputTitle} onChange={(e) => setInputTitle(e.target.value)} placeholder="Title..." className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs focus:border-blue-500 outline-none mb-1" />}
-                                <div className="flex justify-between mb-1">
-                                    {!inputStr && !isViewingHistory && <button onClick={handleLoadSample} className="text-[9px] bg-slate-800 hover:bg-slate-700 text-slate-400 px-1.5 py-0.5 rounded border border-slate-600 transition-colors">Sample</button>}
-                                    {!isViewingHistory && <button onClick={handleSaveAndAdd} className="flex items-center gap-1 bg-blue-600 hover:bg-blue-500 text-white text-[10px] px-2 py-0.5 rounded transition-colors ml-auto"><SimpleIcon name="Save" size={10} /> Save</button>}
-                                </div>
-                                <div className={`flex-1 relative rounded-xl border transition-colors overflow-hidden ${error?'border-red-500/50 bg-red-900/10':'border-slate-700 bg-slate-800'}`}>
-                                    <textarea className={`w-full h-full bg-transparent p-3 font-mono text-xs resize-none focus:outline-none focus:ring-1 focus:ring-blue-500/50 text-slate-400 ${isViewingHistory ? 'cursor-default opacity-80 bg-slate-900/50' : ''}`} value={inputStr} onChange={(e) => setInputStr(e.target.value)} readOnly={isViewingHistory} placeholder='{"_temp": ...}' spellCheck="false" />
-                                    {error && <div className="absolute bottom-2 right-2 text-red-400 text-[10px] flex items-center gap-1 bg-slate-900/90 px-2 py-1 rounded border border-red-500/30"><SimpleIcon name="AlertCircle" size={10} />{error}</div>}
-                                </div>
-                            </div>
-
-                            <div className="flex-1 flex flex-col gap-3 bg-slate-800/50 p-4 rounded-xl border border-slate-700 shadow-xl min-w-0">
-                                <div className="flex items-center justify-between shrink-0">
-                                    <div className="flex items-center gap-2 text-sm font-semibold text-purple-400"><SimpleIcon name="Settings" size={16} /> Mapping Config</div>
-                                    <div className="flex items-center gap-2 relative">
-                                        <div className="flex bg-slate-900 rounded p-0.5 border border-slate-600">
-                                            <button onClick={() => setSortOrder('original')} className={`p-1.5 rounded ${sortOrder==='original'?'bg-slate-700 text-white':'text-slate-500 hover:text-slate-300'}`}><SimpleIcon name="List" size={14}/></button>
-                                            <button onClick={() => setSortOrder('az')} className={`p-1.5 rounded ${sortOrder==='az'?'bg-slate-700 text-white':'text-slate-500 hover:text-slate-300'}`}><SimpleIcon name="SortAsc" size={14}/></button>
-                                        </div>
-                                        <div className="relative">
-                                            <input type="text" value={moduleName} onChange={(e) => setModuleName(e.target.value)} className={`bg-slate-900 border rounded px-2 py-1 text-xs focus:outline-none w-48 text-center transition-all ${isModuleEmpty ? 'border-red-500/50 shadow-[0_0_10px_rgba(239,68,68,0.3)] animate-pulse' : 'border-slate-600 focus:border-purple-500'}`} placeholder="e.g. auth, payment"/>
-                                            {isModuleEmpty && <div className="absolute left-full top-1/2 -translate-y-1/2 ml-2 whitespace-nowrap bg-red-600 text-white text-[10px] px-2 py-1 rounded shadow-lg flex items-center animate-bounce"><span>👈 Enter Module Name</span></div>}
-                                        </div>
-                                    </div>
-                                </div>
-                                <div className="bg-slate-800 rounded p-3 border border-slate-700 shrink-0"><label className="text-xs text-slate-400 block mb-1">Ignore Fields (Comma separated)</label><input type="text" value={ignoreStr} onChange={(e) => setIgnoreStr(e.target.value)} className="w-full bg-slate-900 border border-slate-600 rounded px-2 py-1.5 text-sm focus:border-purple-500 focus:outline-none" placeholder="e.g. password, old_field..." /></div>
-                                <div className="relative shrink-0"><div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"><SimpleIcon name="Search" size={14} /></div><input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Filter fields..." className="w-full bg-slate-900/50 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm focus:border-purple-500 focus:outline-none" /></div>
-                                
-                                <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar flex flex-col gap-2">
-                                    {mergedKeys.length === 0 ? <div className="text-center py-10 text-slate-500 text-sm italic">Waiting for Input...</div> : filteredKeys.length === 0 ? <div className="text-center py-10 text-slate-500 text-sm italic">All fields hidden by filter.</div> : (
-                                        filteredKeys.map((k, idx) => {
-                                            const isExcluded = excludedKeys[k.name];
-                                            const primaryExpanded = expandedPanels[k.name];
-                                            const hasPrimaryConversions = conversions[k.name] && conversions[k.name].length > 0;
-                                            const currentPrefix = moduleName.trim() || 'user';
-                                            const currentVal = mappings[k.name] !== undefined ? mappings[k.name] : `${currentPrefix}.${k.name}`;
-                                            const isSystemDefault = currentVal === `${currentPrefix}.${k.name}`;
-                                            const extras = extraMappings[k.name] || [];
-                                            const inCurrent = currentInputKeys.some(ck => ck.name === k.name);
-                                            const inHistory = historyFields.has(k.name);
-                                            let badge = null;
-                                            if (inCurrent && inHistory) badge = <span className="bg-amber-500/20 text-amber-300 text-[9px] font-bold px-1.5 py-0.5 rounded flex items-center animate-fade-in">EXIST</span>;
-                                            else if (inCurrent && !inHistory) badge = <span className="bg-blue-500/20 text-blue-300 text-[9px] font-bold px-1.5 py-0.5 rounded flex items-center animate-fade-in">NEW</span>;
-                                            const hasChange = k.oldValue !== undefined && k.newValue !== undefined && k.oldValue !== k.newValue;
-                                            // Dynamic validation removed for simplicity, or can add back using static fallback if needed
-                                            const primaryEcsType = ECS_NON_KEYWORD_FIELDS[currentVal];
-                                            const primaryValid = validateEcsType(k.sampleValue, primaryEcsType);
-
-                                            return (
-                                                <div key={`${k.fullPath}-${idx}`} className={`flex flex-col rounded-lg border transition-all ${isExcluded ? 'bg-slate-800/30 border-slate-800 opacity-60' : 'bg-slate-800 border-slate-700 hover:border-purple-500/50'}`}>
-                                                    <div className="flex items-center gap-3 p-2 relative">
-                                                        <div className="flex-[2] min-w-0 flex flex-col justify-center">
-                                                            <div className="flex items-center gap-2"><button onClick={() => toggleExclude(k.name)} className={`transition-colors ${isExcluded?'text-slate-600':'text-purple-400 hover:text-purple-300'}`}>{isExcluded?<SimpleIcon name="EyeOff" size={14}/>:<SimpleIcon name="Eye" size={14}/>}</button><span className={`text-sm font-bold truncate ${isExcluded?'line-through text-slate-500':'text-purple-300'}`} title={k.name}>{k.name}</span>{badge}</div>
-                                                            <div className="ml-6 mt-0.5 text-[10px] text-slate-500 truncate font-mono">
-                                                                {hasChange ? (
-                                                                    <div className="flex items-center gap-1"><span className="line-through opacity-50" title={`Old: ${String(k.oldValue)}`}>{String(k.oldValue).slice(0,15)}{String(k.oldValue).length>15?'...':''}</span><SimpleIcon name="ArrowRight" size={8} className="opacity-50"/><span className="text-emerald-400" title={`New: ${String(k.newValue)}`}>{String(k.newValue).slice(0,20)}{String(k.newValue).length>20?'...':''}</span></div>
-                                                                ) : (<span className="opacity-60" title={String(k.sampleValue)}>{String(k.sampleValue).slice(0,35)}{String(k.sampleValue).length>35?'...':''}</span>)}
-                                                            </div>
-                                                        </div>
-                                                        <SimpleIcon name="ArrowRight" size={12} className="text-slate-600 shrink-0" />
-                                                        <div className="flex-[3] relative">
-                                                            <input type="text" disabled={isExcluded} value={currentVal} onChange={(e) => handleMappingChange(k.name, e.target.value)} className={`w-full bg-slate-900 border rounded pl-2 pr-20 py-1.5 text-sm focus:outline-none transition-colors ${isExcluded?'border-transparent text-slate-600 cursor-not-allowed':`border-slate-600 focus:border-emerald-500 ${isSystemDefault?'text-sky-400':'text-emerald-400'}`}`} placeholder="Target Path" />
-                                                            <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                                                                {primaryEcsType && (
-                                                                    <div className={`text-[9px] px-1.5 py-0.5 rounded border flex items-center gap-1 cursor-help tooltip-trigger ${!primaryValid ? 'bg-red-500/20 text-red-300 border-red-500/30' : 'bg-amber-500/20 text-amber-300 border-amber-500/30'}`}>
-                                                                        <span>ECS: {primaryEcsType}</span>
-                                                                        {!primaryValid && <SimpleIcon name="AlertTriangle" size={10} className="text-red-400" />}
-                                                                        {!primaryValid && <div className="tooltip-content hidden absolute bottom-full right-0 mb-2 w-48 bg-slate-900 border border-red-500/50 text-red-200 p-2 rounded shadow-xl z-10 text-[10px]">Value <strong>'{String(k.sampleValue).slice(0,10)}'</strong> is not a valid <strong>{primaryEcsType}</strong></div>}
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        </div>
-                                                        <div className="flex items-center gap-1">
-                                                            <button onClick={() => !isExcluded && addExtraMapping(k.name)} disabled={isExcluded} className={`p-1.5 rounded transition-all text-xs border ${isExcluded?'opacity-30 cursor-not-allowed border-slate-700 text-slate-500':'bg-slate-700 border-slate-600 text-blue-300 hover:bg-blue-600 hover:text-white hover:border-blue-500'}`}><SimpleIcon name="Plus" size={12}/></button>
-                                                            <button onClick={() => !isExcluded && togglePanel(k.name)} disabled={isExcluded} className={`p-1.5 rounded transition-all flex items-center gap-1 text-xs border ${hasPrimaryConversions?'bg-amber-900/30 text-amber-400 border-amber-500/50':'bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600'} ${isExcluded?'opacity-30 cursor-not-allowed':''}`}><SimpleIcon name="Sliders" size={12}/></button>
-                                                        </div>
-                                                    </div>
-                                                    {primaryExpanded && !isExcluded && (<div className="border-t border-slate-700/50 bg-slate-900/40 p-2 animate-fade-in"><ConversionEditor conversions={conversions[k.name]} onAdd={(f, t) => addConversion(k.name, f, t)} onEdit={(idx, f, t) => updateConversion(k.name, idx, f, t)} onRemove={(i) => removeConversion(k.name, i)} placeholderPrefix={`p-${k.name}`} /></div>)}
-                                                    {extras.map((extraObj, eIdx) => {
-                                                        const extraPanelKey = `${k.name}-extra-${eIdx}`;
-                                                        const isExtraExpanded = expandedPanels[extraPanelKey];
-                                                        const hasExtraConversions = extraObj.conversions && extraObj.conversions.length > 0;
-                                                        const extraEcsType = ECS_NON_KEYWORD_FIELDS[extraObj.path];
-                                                        const extraValid = validateEcsType(k.sampleValue, extraEcsType);
-                                                        return (
-                                                            <div key={`extra-${eIdx}`}>
-                                                                <div className="flex items-center gap-3 p-2 pt-0 relative animate-fade-in">
-                                                                    <div className="flex-[2] flex justify-end pr-4"><SimpleIcon name="CornerDownRight" size={14} className="text-slate-600" /></div>
-                                                                    <SimpleIcon name="ArrowRight" size={12} className="text-slate-600 shrink-0 opacity-50" />
-                                                                    <div className="flex-[3] relative">
-                                                                        <input type="text" disabled={isExcluded} value={extraObj.path} onChange={(e) => updateExtraMapping(k.name, eIdx, e.target.value)} className={`w-full bg-slate-900/50 border border-slate-700 rounded pl-2 pr-20 py-1.5 text-sm focus:outline-none transition-colors text-emerald-300 focus:border-emerald-500 placeholder-slate-600`} placeholder={`${currentPrefix}.${k.name}_copy`} />
-                                                                        <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                                                                            {extraEcsType && (
-                                                                                <div className={`text-[9px] px-1.5 py-0.5 rounded border flex items-center gap-1 cursor-help tooltip-trigger ${!extraValid ? 'bg-red-500/20 text-red-300 border-red-500/30' : 'bg-amber-500/20 text-amber-300 border-amber-500/30'}`}>
-                                                                                    <span>ECS: {extraEcsType}</span>
-                                                                                    {!extraValid && <SimpleIcon name="AlertTriangle" size={10} className="text-red-400" />}
-                                                                                </div>
-                                                                            )}
-                                                                        </div>
-                                                                    </div>
-                                                                    <div className="flex items-center gap-1 w-[60px]"><button onClick={() => togglePanel(extraPanelKey)} className={`p-1.5 rounded transition-all text-xs border ${hasExtraConversions?'bg-amber-900/30 text-amber-400 border-amber-500/50':'text-slate-500 hover:text-slate-300 border-transparent hover:border-slate-600'}`}><SimpleIcon name="Sliders" size={12}/></button><button onClick={() => removeExtraMapping(k.name, eIdx)} className="p-1.5 text-slate-500 hover:text-red-400 transition-colors"><SimpleIcon name="Trash" size={12}/></button></div>
-                                                                </div>
-                                                                {isExtraExpanded && (<div className="border-t border-slate-700/50 bg-slate-900/40 p-2 animate-fade-in"><ConversionEditor conversions={extraObj.conversions} onAdd={(f, t) => addExtraConversion(k.name, eIdx, f, t)} onEdit={(idx, f, t) => updateExtraConversion(k.name, eIdx, idx, f, t)} onRemove={(i) => removeExtraConversion(k.name, eIdx, i)} placeholderPrefix={`e-${k.name}-${eIdx}`} /></div>)}
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            );
-                                        })
-                                    )}
-                                </div>
-                            </div>
-
-                            <div className="w-1/5 flex flex-col gap-2 min-w-[200px]">
-                                <label className="flex items-center gap-2 text-xs font-semibold text-amber-400"><span className="w-2 h-2 rounded-full bg-amber-400"></span>Bulk Import (Excel/TSV)</label>
-                                <div className="h-1/2 relative rounded-xl border border-slate-700 bg-slate-800 overflow-hidden">
-                                    <textarea className="w-full h-full bg-transparent p-3 font-mono text-xs resize-none focus:outline-none focus:ring-1 focus:ring-amber-500/50 text-slate-400" value={bulkMapStr} onChange={(e) => setBulkMapStr(e.target.value)} placeholder={`Paste Excel columns here...\n\nFormat 1 (Simple):\nField Name{tab}Target Path\n\nFormat 2 (Advanced):\nField Name{tab}Conversion Logic{tab}Target Path\n\nExample:\nact\t""Accept""=>""success""\tevent.action`} spellCheck="false" />
-                                    <button onClick={applyBulkImport} className="absolute bottom-2 right-2 p-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded shadow text-[10px] flex items-center gap-1"><SimpleIcon name="Play" size={10} /> Apply</button>
-                                </div>
-                                <div className="flex-1 flex flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-800">
-                                    <div className="flex items-center justify-between p-2 border-b border-slate-700 bg-slate-800/50"><div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400"><SimpleIcon name="History" size={12}/> CHANGE LOG</div>{bulkLog.length > 0 && <button onClick={() => setBulkLog([])} className="text-[9px] text-slate-500 hover:text-red-400">Clear</button>}</div>
-                                    <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
-                                        {bulkLog.length === 0 ? <div className="text-center text-[10px] text-slate-600 py-4 italic">No modifications yet</div> : bulkLog.map(log => (
-                                            <div key={log.id} className="text-[10px] border-l-2 border-amber-500 pl-2 bg-amber-500/5 p-1.5 rounded">
-                                                <div className="text-slate-500 text-[9px] mb-1 flex justify-between"><span>{log.time}</span>{log.type==='info'?<span className="text-blue-400">Info</span>:<span className="text-amber-500">{log.changes.length} Changes</span>}</div>
-                                                {log.type==='info' ? <div className="text-slate-400 italic">{log.message}</div> : log.changes.map((change, idx) => (
-                                                    <div key={idx} className="text-slate-300 truncate">
-                                                        {change.type === 'mapping' && <span><span className="font-mono text-amber-400">{change.key}</span>: <span className="line-through opacity-50">{change.from}</span> &rarr; <span className="text-emerald-400">{change.to}</span></span>}
-                                                        {change.type === 'new_mapping' && <span><span className="text-emerald-400">[NEW]</span> {change.key} &rarr; {change.to}</span>}
-                                                        {change.type === 'extra_added' && <span><span className="text-blue-400">[EXTRA]</span> {change.key} (+{change.count})</span>}
-                                                    </div>
+                        <table className="w-full text-sm text-left">
+                             <thead>
+                                <tr className="text-slate-400 border-b border-slate-100">
+                                    <SortHeader label="日期" skey="date" width="w-28"/>
+                                    <SortHeader label="描述" skey="description"/>
+                                    <SortHeader label="金額" skey="amount" width="w-28"/>
+                                    <SortHeader label="分類" skey="type" width="w-48"/>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-50">
+                                {sortedTransactions.map(t => (
+                                    <tr key={t.id} className="hover:bg-slate-50 group">
+                                        <td className="p-4 font-mono text-xs text-slate-500">{t.date}</td>
+                                        <td className="p-4 font-medium text-slate-700">
+                                            <div className="flex items-center gap-2">
+                                                {t.description.includes('HOTEL') && <ShoppingBag size={14} className="text-orange-400"/>}
+                                                <span className="truncate max-w-xs" title={t.description}>{t.description}</span>
+                                            </div>
+                                        </td>
+                                        <td className="p-4 font-bold text-slate-700">{t.amount.toFixed(2)}</td>
+                                        <td className="p-4 text-center">
+                                            <div className="flex justify-center gap-1">
+                                                {TYPE_OPTIONS.map(o => (
+                                                    <button key={o.id} onClick={() => updateType(t.id, o.id)} className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold transition-all ${t.type===o.id ? o.className+' ring-2 ring-offset-1 ring-slate-200' : 'text-slate-300 hover:bg-slate-100'}`}>{o.label}</button>
                                                 ))}
                                             </div>
-                                        ))}
-                                    </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {/* Mobile Cards */}
+                    <div className="md:hidden space-y-3">
+                        {sortedTransactions.map(t => (
+                            <div key={t.id} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 relative">
+                                <div className="flex justify-between items-start mb-1">
+                                    <span className="text-xs font-mono text-slate-400 bg-slate-50 px-2 py-0.5 rounded">{t.date}</span>
+                                    <span className={`text-lg font-extrabold ${t.source === 'other' ? 'text-orange-600' : 'text-slate-800'}`}>
+                                        {t.source === 'other' ? `MOP ${t.amount.toFixed(2)}` : t.amount.toFixed(2)}
+                                    </span>
+                                </div>
+                                <div className="mb-3 pr-16"> {/* Padding right for type indicator if needed */}
+                                    <p className="text-sm font-medium text-slate-700 leading-tight">{t.description}</p>
+                                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded mt-1 inline-block ${t.cardholder.includes('MAIN') ? 'bg-blue-50 text-blue-600' : t.cardholder.includes('SUB') ? 'bg-pink-50 text-pink-600' : 'bg-gray-100 text-gray-500'}`}>
+                                        {t.cardholder.includes('MAIN') ? 'MAIN' : t.cardholder.includes('SUB') ? 'SUB' : 'OTHER'}
+                                    </span>
+                                </div>
+                                
+                                {/* Action Buttons - Full Width Grid */}
+                                <div className="grid grid-cols-4 gap-2 mt-3 pt-3 border-t border-slate-50">
+                                    {TYPE_OPTIONS.map(o => (
+                                        <button 
+                                            key={o.id} 
+                                            onClick={() => updateType(t.id, o.id)} 
+                                            className={`py-2 rounded-lg flex items-center justify-center text-xs font-bold transition-all border ${t.type===o.id ? o.className + ' shadow-sm' : 'border-transparent text-slate-300 bg-slate-50'}`}
+                                        >
+                                            {o.label}
+                                        </button>
+                                    ))}
                                 </div>
                             </div>
-                        </div>
-                    )}
-
-                    <div className="h-1/4 min-h-[150px] flex flex-col gap-2 shrink-0">
-                        <div className="flex items-center justify-between"><label className="flex items-center gap-2 text-sm font-semibold text-emerald-400"><span className="w-2 h-2 rounded-full bg-emerald-400"></span>Output Config (Real-time)</label><button onClick={handleCopy} className={`flex items-center gap-1 text-xs px-3 py-1.5 rounded transition-colors font-medium ${copySuccess ? 'bg-emerald-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'}`}>{copySuccess ? <SimpleIcon name="Check" size={12} /> : <SimpleIcon name="Copy" size={12} />}{copySuccess ? 'Copied!' : 'Copy JSON'}</button></div>
-                        <div className="flex-1 rounded-xl border border-slate-700 bg-slate-950 overflow-hidden relative shadow-inner"><textarea readOnly className="w-full h-full bg-transparent p-4 font-mono text-xs md:text-sm resize-none text-emerald-50 focus:outline-none" value={outputJson} /></div>
+                        ))}
                     </div>
                 </div>
-            );
-        };
+            ) : (
+                <div className="text-center py-20 text-slate-400">
+                    <p>此月份暫無資料</p>
+                    <p className="text-xs mt-2">請上傳 CSV 或貼上文字賬單</p>
+                </div>
+            )}
+        </div>
+      </div>
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
-</body>
-</html>
+      {/* Keep modals (Same as before) */}
+      {showPairingModal && <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"><div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6"><h3 className="text-lg font-bold mb-4">設定共用 ID</h3><input type="text" className="w-full p-3 border rounded-lg mb-4 font-mono" placeholder="輸入 ID..." value={newPairingInput} onChange={e => setNewPairingInput(e.target.value)} /><div className="flex justify-end gap-3"><button onClick={() => setShowPairingModal(false)} className="px-4 py-2 text-slate-500 font-bold">取消</button><button onClick={confirmPairingId} className="px-4 py-2 bg-green-600 text-white rounded-lg font-bold">確定</button></div></div></div>}
+      {showTextModal && <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"><div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6"><h3 className="text-lg font-bold mb-4">貼上賬單</h3><textarea className="w-full h-64 p-4 border rounded-xl font-mono text-xs bg-slate-50 focus:ring-2 focus:ring-purple-500 outline-none" placeholder="例如: 21-OCT..." value={textInput} onChange={e => setTextInput(e.target.value)} /><div className="flex justify-end gap-3 mt-4"><button onClick={() => setShowTextModal(false)} className="px-4 py-2 text-slate-500 font-bold">取消</button><button onClick={handleTextSubmit} className="px-6 py-2 bg-purple-600 text-white rounded-lg font-bold">確認分析</button></div></div></div>}
+      {showMonthModal && <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"><div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6"><h3 className="text-lg font-bold mb-4">新增月份</h3><input type="text" className="w-full p-3 border rounded-lg mb-4 font-mono" placeholder="YYYY-MM" value={newMonthInput} onChange={e => setNewMonthInput(e.target.value)} /><div className="flex justify-end gap-3"><button onClick={() => setShowMonthModal(false)} className="px-4 py-2 text-slate-500 font-bold">取消</button><button onClick={confirmCreateMonth} className="px-4 py-2 bg-blue-600 text-white rounded-lg font-bold">確定</button></div></div></div>}
+      {showDeleteModal && <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"><div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6"><h3 className="text-lg font-bold text-red-600 flex items-center gap-2"><AlertTriangle size={24}/> 刪除確認</h3><p className="text-slate-600 my-4">確定要刪除 <span className="font-bold text-slate-900">{currentMonth}</span> 嗎？</p><div className="flex justify-end gap-3"><button onClick={() => setShowDeleteModal(false)} className="px-4 py-2 text-slate-500 font-bold">取消</button><button onClick={confirmDeleteMonth} className="px-4 py-2 bg-red-600 text-white rounded-lg font-bold">刪除</button></div></div></div>}
+    </div>
+  );
+};
+
+export default ExpenseSplitter;
