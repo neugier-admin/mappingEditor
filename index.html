@@ -473,18 +473,36 @@
                 return flatFields;
             };
 
+            // Helper to handle CORS issues by falling back to a proxy with retries
+            const fetchWithRetry = async (fn, retries = 3, delay = 1000) => {
+                for (let i = 0; i < retries; i++) {
+                    try {
+                        return await fn();
+                    } catch (err) {
+                        if (i === retries - 1) throw err;
+                        await new Promise(r => setTimeout(r, delay));
+                    }
+                }
+            };
+
             // Helper to handle CORS issues by falling back to a proxy
             const fetchRawFile = async (url) => {
                 try {
+                    // Try direct fetch first (might work if CORS headers are present or same origin)
                     const res = await fetch(url);
                     if (res.ok) return await res.text();
                     throw new Error(res.status);
                 } catch (err) {
                     console.warn("Direct fetch failed, attempting proxy...", err);
+                    
+                    // Fallback to proxy with retries
                     const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-                    const res = await fetch(proxyUrl);
-                    if (!res.ok) throw new Error(`Proxy Error: ${res.status}`);
-                    return await res.text();
+                    
+                    return await fetchWithRetry(async () => {
+                        const res = await fetch(proxyUrl);
+                        if (!res.ok) throw new Error(`Proxy Error: ${res.status}`);
+                        return await res.text();
+                    }, 3, 1500); // Retry 3 times, 1.5s delay
                 }
             };
 
@@ -1112,7 +1130,7 @@
                                 </button>
                             </div>
                             <div className="h-4 w-px bg-slate-700"></div>
-                            <div className="text-xs text-slate-500">v4.4 CORS Fix</div>
+                            <div className="text-xs text-slate-500">v4.5 Auto-Retry Proxy</div>
                             <button onClick={handleResetApp} className="flex items-center gap-1 text-xs bg-red-900/50 hover:bg-red-800 text-red-200 px-2 py-1 rounded border border-red-700/50 transition-colors"><SimpleIcon name="RefreshCw" size={12} /> Reset</button>
                         </div>
                     </header>
