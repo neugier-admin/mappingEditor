@@ -280,7 +280,7 @@
         };
 
         const CoverageChecker = ({ mergedKeys, mappings, extraMappings, moduleName, ignoreList, excludedKeys }) => {
-            const [requirementsStr, setRequirementsStr] = useStickyState("#timestamp\nevent.category\nevent.type\nevent.action", 'jcb_coverage_reqs');
+            const [requirementsStr, setRequirementsStr] = useStickyState("@timestamp\nevent.kind\nevent.category\nevent.type\nevent.outcome", 'jcb_coverage_reqs');
             const [validationJson, setValidationJson] = useStickyState("", 'jcb_coverage_validation_json');
             const [filterStatus, setFilterStatus] = useState('all'); 
 
