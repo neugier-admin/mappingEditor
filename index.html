@@ -38,7 +38,86 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
-        // --- ECS Reference Data ---
+        // --- Helper Functions (Global) ---
+        
+        // Helper to handle CORS issues by falling back to a proxy with retries
+        const fetchWithRetry = async (fn, retries = 3, delay = 1000) => {
+            for (let i = 0; i < retries; i++) {
+                try {
+                    return await fn();
+                } catch (err) {
+                    if (i === retries - 1) throw err;
+                    await new Promise(r => setTimeout(r, delay));
+                }
+            }
+        };
+
+        // Helper to read stream and report progress
+        const readStreamWithProgress = async (response, onProgress) => {
+            const reader = response.body.getReader();
+            const contentLength = +response.headers.get('Content-Length');
+            let receivedLength = 0;
+            let chunks = [];
+
+            while(true) {
+                const {done, value} = await reader.read();
+                if (done) break;
+                
+                chunks.push(value);
+                receivedLength += value.length;
+                
+                if (onProgress) {
+                    onProgress(receivedLength, contentLength);
+                }
+            }
+
+            let chunksAll = new Uint8Array(receivedLength);
+            let position = 0;
+            for(let chunk of chunks) {
+                chunksAll.set(chunk, position);
+                position += chunk.length;
+            }
+
+            return new TextDecoder("utf-8").decode(chunksAll);
+        };
+
+        // Helper to handle CORS issues by falling back to a proxy
+        const fetchRawFile = async (url, onProgress, logMessage) => {
+            // Detect GitHub Raw URL and convert to jsDelivr CDN if possible for better stability
+            let targetUrl = url;
+            if (url.startsWith("https://raw.githubusercontent.com/")) {
+                const parts = url.replace("https://raw.githubusercontent.com/", "").split("/");
+                const user = parts[0];
+                const repo = parts[1];
+                const branch = parts[2];
+                const path = parts.slice(3).join("/");
+                // Use jsDelivr structure: https://cdn.jsdelivr.net/gh/user/repo@branch/path
+                targetUrl = `https://cdn.jsdelivr.net/gh/${user}/${repo}@${branch}/${path}`;
+            }
+
+            try {
+                if (logMessage) logMessage(`Connecting to CDN (${targetUrl})...`);
+                // Try direct fetch first (CDN usually supports CORS)
+                const res = await fetch(targetUrl);
+                if (res.ok) {
+                    return await readStreamWithProgress(res, onProgress);
+                }
+                throw new Error(`Direct fetch failed: ${res.status}`);
+            } catch (err) {
+                if (logMessage) logMessage(`Direct connection failed. Switching to Proxy... (${err.message})`);
+                
+                // Fallback to proxy with original URL if CDN fails
+                const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+                
+                return await fetchWithRetry(async () => {
+                    const res = await fetch(proxyUrl);
+                    if (!res.ok) throw new Error(`Proxy Error: ${res.status}`);
+                    return await readStreamWithProgress(res, onProgress);
+                }, 3, 1500); 
+            }
+        };
+
+        // --- ECS Reference Data (Fallback) ---
         const ECS_NON_KEYWORD_FIELDS = {
             "@timestamp": "date", "event.created": "date", "source.ip": "ip", "source.port": "long" 
         };
@@ -65,7 +144,7 @@
 
         const Icons = {
             Code: <path d="m18 16 4-4-4-4M6 8l-4 4 4 4m6-8-4 8"/>,
-            Settings: <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.39a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/>,
+            Settings: <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.39a2 2 0 0 0-.73-2.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/>,
             ArrowRight: <path d="M5 12h14M12 5l7 7-7 7"/>,
             Copy: <><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></>,
             Check: <path d="M20 6 9 17l-5-5"/>,
@@ -100,7 +179,9 @@
             Filter: <><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></>,
             ChevronDown: <polyline points="6 9 12 15 18 9" />,
             ChevronRight: <polyline points="9 18 15 12 9 6" />,
-            ClipboardCheck: <><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/></>
+            ClipboardCheck: <><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="m9 14 2 2 4-4"/></>,
+            Wifi: <path d="M5 12.55a11 11 0 0 1 14.08 0M1.42 9a16 16 0 0 1 21.16 0M8.53 16.11a6 6 0 0 1 6.95 0M12 20h.01"/>,
+            WifiOff: <><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.58 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></>
         };
 
         const SimpleIcon = ({ name, size, className }) => (
@@ -208,6 +289,7 @@
         };
 
         // --- Components ---
+        // ... ConversionEditor (Keep existing) ...
         const ConversionEditor = ({ conversions, onAdd, onRemove, onEdit, placeholderPrefix }) => {
             const [newFrom, setNewFrom] = useState("");
             const [newTo, setNewTo] = useState("");
@@ -279,6 +361,7 @@
             );
         };
 
+        // ... CoverageChecker (Keep existing) ...
         const CoverageChecker = ({ mergedKeys, mappings, extraMappings, moduleName, ignoreList, excludedKeys }) => {
             const [requirementsStr, setRequirementsStr] = useStickyState("@timestamp\nevent.kind\nevent.category\nevent.type\nevent.outcome", 'jcb_coverage_reqs');
             const [validationJson, setValidationJson] = useStickyState("", 'jcb_coverage_validation_json');
@@ -576,7 +659,6 @@
                 return flatFields;
             };
 
-            // Helper to handle CORS issues by falling back to a proxy with retries
             const fetchWithRetry = async (fn, retries = 3, delay = 1000) => {
                 for (let i = 0; i < retries; i++) {
                     try {
@@ -588,27 +670,10 @@
                 }
             };
 
-            // Helper to handle CORS issues by falling back to a proxy
-            const fetchRawFile = async (url) => {
-                try {
-                    // Try direct fetch first (might work if CORS headers are present or same origin)
-                    const res = await fetch(url);
-                    if (res.ok) return await res.text();
-                    throw new Error(res.status);
-                } catch (err) {
-                    console.warn("Direct fetch failed, attempting proxy...", err);
-                    
-                    // Fallback to proxy with retries
-                    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-                    
-                    return await fetchWithRetry(async () => {
-                        const res = await fetch(proxyUrl);
-                        if (!res.ok) throw new Error(`Proxy Error: ${res.status}`);
-                        return await res.text();
-                    }, 3, 1500); // Retry 3 times, 1.5s delay
-                }
-            };
-
+            // MODIFIED: Re-use global fetchRawFile if possible, but here for self-containment 
+            // we can just call the global one or redefine.
+            // Since fetchRawFile is defined globally in the script, we can use it directly.
+            
             const fetchSchemaContent = async (file) => {
                 setSelectedFile(file);
                 setParsedFields([]);
@@ -900,9 +965,94 @@
             const [error, setError] = useState(null);
             const [copySuccess, setCopySuccess] = useState(false);
             const [searchTerm, setSearchTerm] = useState("");
+            
+            // Global ECS Definitions
+            const [ecsGlobalDefs, setEcsGlobalDefs] = useState({});
+            const [ecsStatus, setEcsStatus] = useState('init'); // init, loading, success, error
+            const [loadingOverlay, setLoadingOverlay] = useState(true);
+            // Add state for download progress log
+            const [downloadLog, setDownloadLog] = useState("");
 
             const ignoreList = useMemo(() => ignoreStr.split(/[,，\n]+/).map(s => s.trim()).filter(s => s), [ignoreStr]);
             const sampleInput = JSON.stringify({ "_temp": { "username": "peter", "action": "pass", "status": "1", "role": "admin", "deprecated_field": "ignore_me" } }, null, 2);
+
+            // Fetch global ECS flat definition on load with Cache and Overlay
+            useEffect(() => {
+                const initApp = async () => {
+                    // 1. Try Cache
+                    const cached = localStorage.getItem('jcb_ecs_global_defs');
+                    if (cached) {
+                        try {
+                            setEcsGlobalDefs(JSON.parse(cached));
+                            setEcsStatus('success');
+                            setLoadingOverlay(false);
+                            return;
+                        } catch (e) {
+                            console.error("Cache invalid", e);
+                            localStorage.removeItem('jcb_ecs_global_defs');
+                        }
+                    }
+
+                    // 2. Fetch if needed
+                    await reloadEcs();
+                };
+                initApp();
+            }, []);
+
+            const reloadEcs = async () => {
+                setEcsStatus('loading');
+                setLoadingOverlay(true);
+                setDownloadLog("Initializing download...");
+                
+                try {
+                    // CDN first
+                    const url = "https://cdn.jsdelivr.net/gh/elastic/ecs@main/generated/ecs/ecs_flat.json";
+                    
+                    // Helper to update progress log UI
+                    const onProgress = (received, total) => {
+                        if (total) {
+                            const percent = Math.round((received / total) * 100);
+                            const mbReceived = (received / (1024 * 1024)).toFixed(1);
+                            const mbTotal = (total / (1024 * 1024)).toFixed(1);
+                            setDownloadLog(`Downloading... ${mbReceived} MB / ${mbTotal} MB (${percent}%)`);
+                        } else {
+                            const mbReceived = (received / (1024 * 1024)).toFixed(1);
+                            setDownloadLog(`Downloading... ${mbReceived} MB`);
+                        }
+                    };
+
+                    const text = await fetchRawFile(url, onProgress, (msg) => setDownloadLog(msg));
+                    setDownloadLog("Parsing JSON...");
+                    const json = JSON.parse(text);
+                    setEcsGlobalDefs(json);
+                    setEcsStatus('success');
+                    localStorage.setItem('jcb_ecs_global_defs', JSON.stringify(json));
+                    setLoadingOverlay(false);
+                } catch(e) {
+                    console.warn("Failed to load ECS flat definitions", e);
+                    setEcsStatus('error');
+                    setDownloadLog(`Error: ${e.message}`);
+                    // Don't close overlay automatically on error to show retry options
+                }
+            };
+
+            const handleSkipLoading = () => {
+                setLoadingOverlay(false);
+            };
+
+            const handleForceReset = (e) => {
+                if (e.altKey) {
+                    if(confirm("Clear ECS Cache?")) {
+                        localStorage.removeItem('jcb_ecs_global_defs');
+                        window.location.reload();
+                    }
+                } else {
+                    if(confirm("Are you sure you want to clear all data and reset?")) {
+                        localStorage.clear();
+                        window.location.reload();
+                    }
+                }
+            };
 
             useEffect(() => {
                 if (viewingId === null) {
@@ -929,13 +1079,6 @@
             }, [inputStr]);
 
             const currentInputKeys = useMemo(() => (!parsedJson ? [] : extractKeys(parsedJson)), [parsedJson]);
-
-            const handleResetApp = () => {
-                if(confirm("Are you sure you want to clear all data and reset?")) {
-                    localStorage.clear();
-                    window.location.reload();
-                }
-            };
 
             const handleLoadSample = () => {
                 setInputStr(sampleInput);
@@ -1204,6 +1347,46 @@
             const isModuleEmpty = !moduleName;
             const isViewingHistory = viewingId !== null;
 
+            if (loadingOverlay) {
+                return (
+                    <div className="fixed inset-0 bg-slate-900 z-50 flex flex-col items-center justify-center gap-4">
+                        <div className="text-slate-200 text-lg font-bold flex items-center gap-3">
+                            <SimpleIcon name="Globe" size={24} className="text-blue-500" />
+                            JSON Mapping Config Builder
+                        </div>
+                        {ecsStatus === 'loading' && (
+                            <div className="flex flex-col items-center gap-4 w-80">
+                                <div className="flex items-center gap-2">
+                                    <SimpleIcon name="RefreshCw" size={24} className="text-blue-400 animate-spin" />
+                                    <div className="text-slate-400 text-xs font-mono">Loading ECS Definitions...</div>
+                                </div>
+                                {/* Log Area */}
+                                <div className="w-full bg-slate-950 border border-slate-800 rounded p-2 text-[10px] font-mono text-slate-500 h-24 overflow-y-auto custom-scrollbar">
+                                    {downloadLog || "Starting..."}
+                                </div>
+                            </div>
+                        )}
+                        {ecsStatus === 'error' && (
+                            <div className="flex flex-col items-center gap-3">
+                                <div className="text-red-400 text-sm flex items-center gap-2 bg-red-900/20 px-3 py-2 rounded border border-red-800">
+                                    <SimpleIcon name="AlertTriangle" size={16} />
+                                    Failed to load ECS Definitions
+                                </div>
+                                <div className="text-[10px] text-slate-500 max-w-xs text-center mb-2">{downloadLog}</div>
+                                <div className="flex gap-2">
+                                    <button onClick={() => reloadEcs()} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs font-bold transition-colors">
+                                        Retry Download
+                                    </button>
+                                    <button onClick={handleSkipLoading} className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-300 rounded text-xs transition-colors">
+                                        Continue Offline (No Type Hints)
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                );
+            }
+
             return (
                 <div className="flex flex-col h-screen p-4 gap-4 overflow-hidden relative">
                     <header className="flex items-center justify-between border-b border-slate-700 pb-2 shrink-0">
@@ -1212,6 +1395,12 @@
                             <h1 className="text-lg font-bold text-white">JSON Mapping Config Builder</h1>
                         </div>
                         <div className="flex items-center gap-4">
+                            {/* ECS Status Indicator */}
+                            <div className="flex items-center gap-1.5 text-xs border border-slate-700 bg-slate-800 px-2 py-1 rounded-md" title={ecsStatus === 'success' ? 'ECS Definitions Loaded' : ecsStatus === 'error' ? 'Failed to load ECS Definitions' : 'Loading ECS Definitions...'}>
+                                <span className={`w-2 h-2 rounded-full ${ecsStatus === 'success' ? 'bg-emerald-500 shadow-[0_0_5px_rgba(16,185,129,0.6)]' : ecsStatus === 'error' ? 'bg-red-500' : 'bg-amber-500 animate-pulse'}`}></span>
+                                <span className="text-slate-400 font-mono">ECS</span>
+                            </div>
+
                             <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700">
                                 <button 
                                     onClick={() => setActiveTab('builder')}
@@ -1233,8 +1422,8 @@
                                 </button>
                             </div>
                             <div className="h-4 w-px bg-slate-700"></div>
-                            <div className="text-xs text-slate-500">v4.7 Deep Nesting Support</div>
-                            <button onClick={handleResetApp} className="flex items-center gap-1 text-xs bg-red-900/50 hover:bg-red-800 text-red-200 px-2 py-1 rounded border border-red-700/50 transition-colors"><SimpleIcon name="RefreshCw" size={12} /> Reset</button>
+                            <div className="text-xs text-slate-500">v5.2 Download Progress</div>
+                            <button onClick={handleForceReset} className="flex items-center gap-1 text-xs bg-red-900/50 hover:bg-red-800 text-red-200 px-2 py-1 rounded border border-red-700/50 transition-colors" title="Click to Reset App. Alt+Click to Clear ECS Cache."><SimpleIcon name="RefreshCw" size={12} /> Reset</button>
                         </div>
                     </header>
 
@@ -1305,7 +1494,9 @@
                                             if (inCurrent && inHistory) badge = <span className="bg-amber-500/20 text-amber-300 text-[9px] font-bold px-1.5 py-0.5 rounded flex items-center animate-fade-in">EXIST</span>;
                                             else if (inCurrent && !inHistory) badge = <span className="bg-blue-500/20 text-blue-300 text-[9px] font-bold px-1.5 py-0.5 rounded flex items-center animate-fade-in">NEW</span>;
                                             const hasChange = k.oldValue !== undefined && k.newValue !== undefined && k.oldValue !== k.newValue;
-                                            const primaryEcsType = ECS_NON_KEYWORD_FIELDS[currentVal];
+                                            
+                                            // Dynamic ECS Type Lookup
+                                            const primaryEcsType = ecsGlobalDefs[currentVal]?.type || ECS_NON_KEYWORD_FIELDS[currentVal];
                                             const primaryValid = validateEcsType(k.sampleValue, primaryEcsType);
 
                                             return (
@@ -1342,7 +1533,7 @@
                                                         const extraPanelKey = `${k.name}-extra-${eIdx}`;
                                                         const isExtraExpanded = expandedPanels[extraPanelKey];
                                                         const hasExtraConversions = extraObj.conversions && extraObj.conversions.length > 0;
-                                                        const extraEcsType = ECS_NON_KEYWORD_FIELDS[extraObj.path];
+                                                        const extraEcsType = ecsGlobalDefs[extraObj.path]?.type || ECS_NON_KEYWORD_FIELDS[extraObj.path];
                                                         const extraValid = validateEcsType(k.sampleValue, extraEcsType);
                                                         return (
                                                             <div key={`extra-${eIdx}`}>
