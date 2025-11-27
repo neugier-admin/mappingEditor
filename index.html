@@ -40,7 +40,6 @@
 
         // --- Helper Functions (Global) ---
         
-        // Helper to handle CORS issues by falling back to a proxy with retries
         const fetchWithRetry = async (fn, retries = 3, delay = 1000) => {
             for (let i = 0; i < retries; i++) {
                 try {
@@ -81,9 +80,7 @@
             return new TextDecoder("utf-8").decode(chunksAll);
         };
 
-        // Helper to handle CORS issues by falling back to a proxy
         const fetchRawFile = async (url, onProgress, logMessage) => {
-            // Detect GitHub Raw URL and convert to jsDelivr CDN if possible for better stability
             let targetUrl = url;
             if (url.startsWith("https://raw.githubusercontent.com/")) {
                 const parts = url.replace("https://raw.githubusercontent.com/", "").split("/");
@@ -91,22 +88,18 @@
                 const repo = parts[1];
                 const branch = parts[2];
                 const path = parts.slice(3).join("/");
-                // Use jsDelivr structure: https://cdn.jsdelivr.net/gh/user/repo@branch/path
                 targetUrl = `https://cdn.jsdelivr.net/gh/${user}/${repo}@${branch}/${path}`;
             }
 
             try {
-                if (logMessage) logMessage(`Connecting to CDN (${targetUrl})...`);
-                // Try direct fetch first (CDN usually supports CORS)
+                if (logMessage) logMessage(`Connecting to CDN...`);
                 const res = await fetch(targetUrl);
                 if (res.ok) {
                     return await readStreamWithProgress(res, onProgress);
                 }
                 throw new Error(`Direct fetch failed: ${res.status}`);
             } catch (err) {
-                if (logMessage) logMessage(`Direct connection failed. Switching to Proxy... (${err.message})`);
-                
-                // Fallback to proxy with original URL if CDN fails
+                if (logMessage) logMessage(`Direct connection failed. Switching to Proxy...`);
                 const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
                 
                 return await fetchWithRetry(async () => {
@@ -117,7 +110,7 @@
             }
         };
 
-        // --- ECS Reference Data (Fallback) ---
+        // --- ECS Reference Data ---
         const ECS_NON_KEYWORD_FIELDS = {
             "@timestamp": "date", "event.created": "date", "source.ip": "ip", "source.port": "long" 
         };
@@ -289,7 +282,6 @@
         };
 
         // --- Components ---
-        // ... ConversionEditor (Keep existing) ...
         const ConversionEditor = ({ conversions, onAdd, onRemove, onEdit, placeholderPrefix }) => {
             const [newFrom, setNewFrom] = useState("");
             const [newTo, setNewTo] = useState("");
@@ -361,7 +353,6 @@
             );
         };
 
-        // ... CoverageChecker (Keep existing) ...
         const CoverageChecker = ({ mergedKeys, mappings, extraMappings, moduleName, ignoreList, excludedKeys }) => {
             const [requirementsStr, setRequirementsStr] = useStickyState("@timestamp\nevent.kind\nevent.category\nevent.type\nevent.outcome", 'jcb_coverage_reqs');
             const [validationJson, setValidationJson] = useStickyState("", 'jcb_coverage_validation_json');
@@ -372,17 +363,11 @@
                 try {
                     const parsed = JSON.parse(validationJson);
                     let source = parsed;
-                    
-                    // Handle common Elasticsearch formats strategy
                     if (parsed._source) {
-                        // Direct document source
                         source = parsed._source;
                     } else if (parsed.hits && parsed.hits.hits && Array.isArray(parsed.hits.hits) && parsed.hits.hits.length > 0 && parsed.hits.hits[0]._source) {
-                        // Search response (hits.hits[0]._source)
                         source = parsed.hits.hits[0]._source;
                     } else if (parsed.docs && Array.isArray(parsed.docs) && parsed.docs.length > 0) {
-                        // Ingest Simulate / Mget response
-                        // Structure: { "docs": [ { "doc": { "_source": ... } } ] }
                         const docItem = parsed.docs[0];
                         if (docItem.doc && docItem.doc._source) {
                             source = docItem.doc._source;
@@ -390,7 +375,6 @@
                             source = docItem._source;
                         }
                     }
-                    
                     const keys = flattenObjectKeys(source);
                     return new Set(keys);
                 } catch (e) {
@@ -450,6 +434,10 @@
             const configProgress = Math.round((report.filter(r => r.mapped).length / (report.length || 1)) * 100);
             const outputProgress = Math.round((report.filter(r => r.inOutput).length / (report.length || 1)) * 100);
 
+            // Mustache-safe styles
+            const configBarStyle = { width: `${configProgress}%` };
+            const outputBarStyle = { width: `${outputProgress}%` };
+
             return (
                 <div className="flex h-full gap-4">
                     <div className="w-1/4 min-w-[250px] flex flex-col gap-3 bg-slate-800/50 p-3 rounded-xl border border-slate-700">
@@ -501,7 +489,7 @@
                                         <span className="text-[9px] text-slate-500 uppercase font-bold">Config Coverage</span>
                                         <div className="flex items-center gap-2">
                                             <div className="w-16 h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                                                <div className={`h-full transition-all duration-500 ${configProgress === 100 ? 'bg-blue-500' : 'bg-blue-600/50'}`} style={{ width: `${configProgress}%` }}></div>
+                                                <div className={`h-full transition-all duration-500 ${configProgress === 100 ? 'bg-blue-500' : 'bg-blue-600/50'}`} style={configBarStyle}></div>
                                             </div>
                                             <span className={`text-xs font-bold ${configProgress === 100 ? 'text-blue-400' : 'text-slate-400'}`}>{configProgress}%</span>
                                         </div>
@@ -511,7 +499,7 @@
                                             <span className="text-[9px] text-slate-500 uppercase font-bold">Output Match</span>
                                             <div className="flex items-center gap-2">
                                                 <div className="w-16 h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                                                    <div className={`h-full transition-all duration-500 ${outputProgress === 100 ? 'bg-emerald-500' : 'bg-emerald-600/50'}`} style={{ width: `${outputProgress}%` }}></div>
+                                                    <div className={`h-full transition-all duration-500 ${outputProgress === 100 ? 'bg-emerald-500' : 'bg-emerald-600/50'}`} style={outputBarStyle}></div>
                                                 </div>
                                                 <span className={`text-xs font-bold ${outputProgress === 100 ? 'text-emerald-400' : 'text-slate-400'}`}>{outputProgress}%</span>
                                             </div>
@@ -1422,7 +1410,7 @@
                                 </button>
                             </div>
                             <div className="h-4 w-px bg-slate-700"></div>
-                            <div className="text-xs text-slate-500">v5.3 Fix JSX</div>
+                            <div className="text-xs text-slate-500">v5.4 Node-RED Compatible</div>
                             <button onClick={handleForceReset} className="flex items-center gap-1 text-xs bg-red-900/50 hover:bg-red-800 text-red-200 px-2 py-1 rounded border border-red-700/50 transition-colors" title="Click to Reset App. Alt+Click to Clear ECS Cache."><SimpleIcon name="RefreshCw" size={12} /> Reset</button>
                         </div>
                     </header>
