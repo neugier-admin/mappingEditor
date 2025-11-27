@@ -65,7 +65,7 @@
 
         const Icons = {
             Code: <path d="m18 16 4-4-4-4M6 8l-4 4 4 4m6-8-4 8"/>,
-            Settings: <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.39a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/>,
+            Settings: <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.39a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/>,
             ArrowRight: <path d="M5 12h14M12 5l7 7-7 7"/>,
             Copy: <><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></>,
             Check: <path d="M20 6 9 17l-5-5"/>,
@@ -289,11 +289,23 @@
                 try {
                     const parsed = JSON.parse(validationJson);
                     let source = parsed;
-                    // Handle common Elasticsearch formats
+                    
+                    // Handle common Elasticsearch formats strategy
                     if (parsed._source) {
+                        // Direct document source
                         source = parsed._source;
-                    } else if (parsed.hits && parsed.hits.hits && parsed.hits.hits.length > 0 && parsed.hits.hits[0]._source) {
+                    } else if (parsed.hits && parsed.hits.hits && Array.isArray(parsed.hits.hits) && parsed.hits.hits.length > 0 && parsed.hits.hits[0]._source) {
+                        // Search response (hits.hits[0]._source)
                         source = parsed.hits.hits[0]._source;
+                    } else if (parsed.docs && Array.isArray(parsed.docs) && parsed.docs.length > 0) {
+                        // Ingest Simulate / Mget response
+                        // Structure: { "docs": [ { "doc": { "_source": ... } } ] }
+                        const docItem = parsed.docs[0];
+                        if (docItem.doc && docItem.doc._source) {
+                            source = docItem.doc._source;
+                        } else if (docItem._source) {
+                            source = docItem._source;
+                        }
                     }
                     
                     const keys = flattenObjectKeys(source);
@@ -389,7 +401,7 @@
                                 value={validationJson} 
                                 onChange={e => setValidationJson(e.target.value)}
                                 className="flex-1 w-full bg-slate-900 border border-slate-600 rounded p-2 text-[10px] font-mono focus:border-blue-500 outline-none resize-none custom-scrollbar text-slate-400"
-                                placeholder='{"_source": { "event": { "category": "..." } } }'
+                                placeholder='{"docs": [{"doc": {"_source": {"event": ...}}}]}'
                                 spellCheck="false"
                             />
                         </div>
@@ -1221,7 +1233,7 @@
                                 </button>
                             </div>
                             <div className="h-4 w-px bg-slate-700"></div>
-                            <div className="text-xs text-slate-500">v4.6 Dual Validation</div>
+                            <div className="text-xs text-slate-500">v4.7 Deep Nesting Support</div>
                             <button onClick={handleResetApp} className="flex items-center gap-1 text-xs bg-red-900/50 hover:bg-red-800 text-red-200 px-2 py-1 rounded border border-red-700/50 transition-colors"><SimpleIcon name="RefreshCw" size={12} /> Reset</button>
                         </div>
                     </header>
